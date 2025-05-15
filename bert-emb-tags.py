@@ -8,6 +8,8 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from torch.utils.tensorboard import SummaryWriter
 import os
+from tqdm import tqdm
+import conf
 
 import bert_parsing
 
@@ -18,16 +20,17 @@ import bert_parsing
 ID_RUN = time.strftime("%Y%m%d-%H%M%S")
 MODEL_NAME = "bert-base-uncased"
 EMBEDDING_DIM = 384  # Should match the dimension of tag embeddings
-MAX_LEN = 256
-BATCH_SIZE = 16
+MAX_LEN = 320
+BATCH_SIZE = 4
 EPOCHS = 15
 LEARNING_RATE = 2e-5
 CONFIG_SAVE_DIR = "configs/bert_embed_regression" + ID_RUN
 SAVE_DIR = "checkpoints/bert_embed_regression" + ID_RUN
 LOG_DIR = "runs/bert_embed_regression"+ID_RUN
-EVAL_EVERY = 3
-SAVE_EVERY = 5
-DATA_EMBED_JSON = "datasets/processed/embedding/"
+EVAL_EVERY = 2
+SAVE_EVERY = 4
+SPLIT_DIR = conf.split_dir
+
 
 # ----------------------
 # Dataset
@@ -36,6 +39,7 @@ class CardDataset(Dataset):
     def __init__(self, data, tokenizer):
         self.tokenizer = tokenizer
         self.data = data
+
 
     def __len__(self):
         return len(self.data)
@@ -67,15 +71,19 @@ class BertEmbedRegressor(nn.Module):
         return self.linear(self.dropout(pooled))
 
 # ----------------------
-# Training Utilities
+# Training Utilities with tqdm
 # ----------------------
 def train_loop(model, dataloader, optimizer, loss_fn, device, writer, epoch):
     model.train()
     total_loss = 0
-    for i, batch in enumerate(dataloader):
+    pbar = tqdm(enumerate(dataloader), total=len(dataloader), desc=f"Epoch {epoch+1} Train")
+    similarities = []
+    for i, batch in pbar:
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
         targets = batch['target'].to(device)
+
+        batch_similarities = []
 
         optimizer.zero_grad()
         outputs = model(input_ids, attention_mask)
@@ -84,41 +92,70 @@ def train_loop(model, dataloader, optimizer, loss_fn, device, writer, epoch):
         optimizer.step()
 
         total_loss += loss.item()
-        writer.add_scalar("Train/Batch_Loss", loss.item(), epoch * len(dataloader) + i)
 
+        for p, t in zip(outputs, targets):
+            sim = cosine_similarity([p.cpu().detach().numpy()], [t.cpu().detach().numpy()])[0][0]
+            similarities.append(sim)
+            batch_similarities.append(sim)
+        
+        avg_sim_batch = np.mean(batch_similarities)
+        writer.add_scalar("Train/Batch_CosineSimilarity", avg_sim_batch, epoch * len(dataloader) + i)
+        writer.add_scalar("Train/Batch_Loss", loss.item(), epoch * len(dataloader) + i)
+        pbar.set_postfix(loss=loss.item())
+
+    avg_sim = np.mean(similarities)
+    writer.add_scalar("Train/CosineSimilarity", avg_sim, epoch)
     avg_loss = total_loss / len(dataloader)
     writer.add_scalar("Train/Epoch_Loss", avg_loss, epoch)
     return avg_loss
 
 def eval_loop(model, dataloader, loss_fn, device, writer, epoch):
     model.eval()
+    similarities = []
     total_loss = 0
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch+1} Eval")
     with torch.no_grad():
-        for batch in dataloader:
+        for batch in pbar:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            targets = batch['target'].to(device)
+            outputs = model(input_ids, attention_mask)
+            for p, t in zip(outputs, targets):
+                sim = cosine_similarity([p.cpu().detach().numpy()], [t.cpu().detach().numpy()])[0][0]
+                similarities.append(sim)
+            loss = loss_fn(outputs, targets)
+            total_loss += loss.item()
+            pbar.set_postfix(loss=loss.item())
+
+    avg_loss = total_loss / len(dataloader)
+    avg_sim = np.mean(similarities)
+    writer.add_scalar("Eval/Loss", avg_loss, epoch)
+    writer.add_scalar("Eval/CosineSimilarity", avg_sim, epoch)
+    return avg_loss, avg_sim
+
+def test_loop(model, dataloader, loss_fn, device, writer, desc):
+    model.eval()
+    total_loss = 0
+    similarities = []
+    pbar = tqdm(dataloader, desc="Testing "+desc)
+    with torch.no_grad():
+        for batch in pbar:
             input_ids = batch['input_ids'].to(device)
             attention_mask = batch['attention_mask'].to(device)
             targets = batch['target'].to(device)
             outputs = model(input_ids, attention_mask)
             loss = loss_fn(outputs, targets)
             total_loss += loss.item()
-
-    avg_loss = total_loss / len(dataloader)
-    writer.add_scalar("Eval/Loss", avg_loss, epoch)
-    return avg_loss
-
-def cosine_sim_test(model, dataloader, device):
-    model.eval()
-    similarities = []
-    with torch.no_grad():
-        for batch in dataloader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            targets = batch['target'].cpu().numpy()
-            preds = model(input_ids, attention_mask).cpu().numpy()
-            for p, t in zip(preds, targets):
+            for p, t in zip(outputs.cpu().detach().numpy(), targets.cpu().detach().numpy()):
                 sim = cosine_similarity([p], [t])[0][0]
                 similarities.append(sim)
-    return np.mean(similarities)
+            pbar.set_postfix(loss=loss.item())
+    avg_loss = total_loss / len(dataloader)
+    avg_sim = np.mean(similarities)
+    writer.add_scalar(f"Test/{desc}/Loss", avg_loss)
+    writer.add_scalar(f"Test/{desc}/CosineSimilarity", avg_sim)
+    return avg_loss, avg_sim
+
 
 # ----------------------
 # Load Data
@@ -136,12 +173,10 @@ if __name__ == "__main__":
     tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
     writer = SummaryWriter(log_dir=LOG_DIR)
 
-    data = load_data(DATA_EMBED_JSON)
-    np.random.shuffle(data)
-    split1 = int(0.8 * len(data))
-    split2 = int(0.9 * len(data))
-
-    train_data, val_data, test_data = data[:split1], data[split1:split2], data[split2:]
+    # Load data
+    train_data = load_data(os.path.join(SPLIT_DIR, "train_data.json"))
+    val_data = load_data(os.path.join(SPLIT_DIR, "val_data.json"))
+    test_data = load_data(os.path.join(SPLIT_DIR, "test_data.json"))
 
     train_ds = CardDataset(train_data, tokenizer)
     val_ds = CardDataset(val_data, tokenizer)
@@ -167,20 +202,24 @@ if __name__ == "__main__":
             "learning_rate": LEARNING_RATE
         }, f, indent=4)
 
+    test_loss, test_sim = test_loop(model, test_loader, loss_fn, device, writer, "Initial Test")
+    print(f"Initial Test Loss: {test_loss:.4f}, Cosine Similarity: {test_sim:.4f}")
+
     for epoch in range(EPOCHS):
         train_loss = train_loop(model, train_loader, optimizer, loss_fn, device, writer, epoch)
         print(f"Epoch {epoch+1}: Train Loss = {train_loss:.4f}")
 
         if (epoch + 1) % EVAL_EVERY == 0:
-            val_loss = eval_loop(model, val_loader, loss_fn, device, writer, epoch)
-            print(f"           Val Loss   = {val_loss:.4f}")
+            val_loss, val_sim = eval_loop(model, val_loader, loss_fn, device, writer, epoch)
+            
+            print(f"Epoch {epoch+1}: Validation Loss = {val_loss:.4f}, Cosine Similarity = {val_sim:.4f}")
         
         if (epoch + 1) % SAVE_EVERY == 0:
             torch.save(model.state_dict(), os.path.join(SAVE_DIR, f"model_epoch_{epoch+1}.pth"))
             print(f"Model saved at epoch {epoch+1}")
 
-    test_sim = cosine_sim_test(model, test_loader, device)
-    writer.add_scalar("Test/CosineSimilarity", test_sim, EPOCHS)
-    print(f"Average Cosine Similarity on Test Set: {test_sim:.4f}")
+    # Final test
+    test_loss, test_sim = test_loop(model, test_loader, loss_fn, device, writer, "Final Test")
+    print(f"Final Test Loss: {test_loss:.4f}, Cosine Similarity: {test_sim:.4f}")
 
     writer.close()

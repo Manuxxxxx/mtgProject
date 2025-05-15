@@ -42,6 +42,10 @@ processed_json = "datasets/processed/no_indent/commander_legal_cards202505151454
 
 processed_tag_dir = "datasets/processed/tag_included/"
 
+embedding_file = "datasets/processed/embedding/card_embs_20250515151222.json"
+
+split_dir = "datasets/split/"
+
 MTG_KEYWORDS = {
     "Deathtouch": "Any amount of damage this deals to a creature is enough to destroy it.",
     "Defender": "This creature can't attack.",
