@@ -2,6 +2,7 @@ import time
 import requests
 import json
 import conf
+import brotli
 
 
 def get_card_info(set_code, card_number, X_CSRF_Token, cookie, debug=False):
@@ -119,7 +120,18 @@ def get_card_info(set_code, card_number, X_CSRF_Token, cookie, debug=False):
 
     try:
         response = requests.post(url, headers=headers, json=payload)
+        if(debug):
+            print("Request URL:", response.url)
+            print("Request Headers:", response.request.headers)
+            print("Request Body:", json.dumps(payload, indent=2))
+            print("Response Status Code:", response.status_code)
+            print("Response Headers:", response.headers)
+            print("Response Body:", response.text)
         response.raise_for_status()  # Check for HTTP errors
+        if response.text.strip() == "":
+            print("Empty response received.")
+            return None
+        
         data = response.json()
         card_tagggins = data["data"]["card"]["taggings"]
         processed_tags = []
