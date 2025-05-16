@@ -218,6 +218,7 @@ if __name__ == "__main__":
             torch.save(model.state_dict(), os.path.join(SAVE_DIR, f"model_epoch_{epoch+1}.pth"))
             print(f"Model saved at epoch {epoch+1}")
 
+    torch.save(model.state_dict(), os.path.join(SAVE_DIR, "model_epoch_final.pth"))
     # Final test
     test_loss, test_sim = test_loop(model, test_loader, loss_fn, device, writer, "Final Test")
     print(f"Final Test Loss: {test_loss:.4f}, Cosine Similarity: {test_sim:.4f}")
