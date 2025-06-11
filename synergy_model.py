@@ -23,8 +23,8 @@ class ModelSimple(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 64),
             nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Linear(64, 1)
+            # Removed Sigmoid: use BCEWithLogitsLoss + torch.sigmoid in forward or after logits
         )
 
     def forward(self, embed1, embed2):
@@ -47,8 +47,8 @@ class ModelComplex(nn.Module):
             nn.Dropout(0.2),
             nn.Linear(256, 64),
             nn.ReLU(),
-            nn.Linear(64, 1),
-            nn.Sigmoid()
+            nn.Linear(64, 1)
+            # Removed Sigmoid here too
         )
 
     def forward(self, embed1, embed2):
@@ -57,15 +57,30 @@ class ModelComplex(nn.Module):
 
 
 # ----------------------
+# Weight Initialization
+# ----------------------
+def init_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.BatchNorm1d):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+
+
+# ----------------------
 # Model Factory
 # ----------------------
 def build_model(arch_name, embedding_dim):
     if arch_name == "modelSimple":
-        return ModelSimple(embedding_dim)
+        model = ModelSimple(embedding_dim)
     elif arch_name == "modelComplex":
-        return ModelComplex(embedding_dim)
+        model = ModelComplex(embedding_dim)
     else:
         raise ValueError(f"Unknown model architecture: {arch_name}")
+    model.apply(init_weights)
+    return model
 
 
 # ----------------------
@@ -103,6 +118,7 @@ class SynergyDataset(Dataset):
             synergy = entry.get('synergy', 0)
 
             if card1 not in self.embedding_dict or card2 not in self.embedding_dict:
+                # print(f"Skipping pair ({card1}, {card2}) due to missing embeddings.")
                 continue
 
             emb1 = self.embedding_dict[card1]
@@ -126,38 +142,99 @@ class SynergyDataset(Dataset):
     def __getitem__(self, idx):
         return self.data[idx]
 
+
+
+# ----------------------
+# Weighted Loss Calculation Helper
+# ----------------------
+def calculate_weighted_loss(logits, labels, loss_fn, false_positive_penalty=1.0):
+    """
+    logits: raw output from model (no sigmoid applied yet)
+    labels: ground truth labels (0 or 1)
+    loss_fn: loss function (expects raw logits for BCEWithLogitsLoss)
+    false_positive_penalty: multiplier applied to false positives in the batch
+    """
+    loss = loss_fn(logits, labels)
+    probs = torch.sigmoid(logits)
+    preds = (probs > 0.5).float()
+    #print all the predictions and labels
+    # print(f"Predictions: {preds.cpu().numpy()}, Labels: {labels.cpu().numpy()}")
+    # print("Logits:", logits[:10].detach().cpu().numpy())
+
+    weights = torch.ones_like(labels)
+    false_positive_mask = (labels == 0) & (preds == 1)
+    weights[false_positive_mask] = false_positive_penalty
+
+    #calculate TP, TN, FP, FN as a dictionary
+    confusion_matrix = {}
+    true_positive_mask = (labels == 1) & (preds == 1)
+    true_negative_mask = (labels == 0) & (preds == 0)
+    false_negative_mask = (labels == 1) & (preds == 0)
+    false_positive_mask = (labels == 0) & (preds == 1)
+    confusion_matrix['TP'] = true_positive_mask.sum().item()
+    confusion_matrix['TN'] = true_negative_mask.sum().item()    
+    confusion_matrix['FP'] = false_positive_mask.sum().item()
+    confusion_matrix['FN'] = false_negative_mask.sum().item()
+
+    weighted_loss = (loss * weights).mean()
+    return weighted_loss, preds, confusion_matrix
+
+
 @torch.no_grad()
-def eval_loop(model, dataloader, device, epoch, writer, prefix="Val"):
+def eval_loop(model, dataloader, device, epoch, writer, prefix="Val", false_positive_penalty=1.0, BCEweight = 1.0):
     model.eval()
     all_preds = []
     all_labels = []
+    full_confusion_matrix = {
+        'TP': 0,
+        'TN': 0,
+        'FP': 0,
+        'FN': 0
+    }
+    total_weighted_loss = 0.0
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([BCEweight]).to(device))
+
 
     loop = tqdm(dataloader, desc=f"{prefix} Evaluation")
     for emb1, emb2, label in loop:
-        emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device)
-
+        emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device).view(-1)
         logits = model(emb1, emb2).view(-1)
-        preds = (logits > 0.5).float()
+
+        weighted_loss, preds, confusion_matrix = calculate_weighted_loss(logits, label, loss_fn, false_positive_penalty)
+        total_weighted_loss += weighted_loss.item()
 
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(label.cpu().numpy())
+
+        for key in full_confusion_matrix:
+            full_confusion_matrix[key] += confusion_matrix[key]
 
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
     f1 = f1_score(all_labels, all_preds, zero_division=0)
 
+    avg_weighted_loss = total_weighted_loss / len(dataloader)
+
+    writer.add_scalar(f"{prefix}/WeightedLoss", avg_weighted_loss, epoch)
     writer.add_scalar(f"{prefix}/Precision", precision, epoch)
     writer.add_scalar(f"{prefix}/Recall", recall, epoch)
     writer.add_scalar(f"{prefix}/F1", f1, epoch)
 
-    print(f"{prefix} Epoch {epoch+1} — Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+    writer.add_scalar(f"{prefix}/confusion_matrix/TP", full_confusion_matrix['TP'], epoch)
+    writer.add_scalar(f"{prefix}/confusion_matrix/TN", full_confusion_matrix['TN'], epoch)
+    writer.add_scalar(f"{prefix}/confusion_matrix/FP", full_confusion_matrix['FP'], epoch)
+    writer.add_scalar(f"{prefix}/confusion_matrix/FN", full_confusion_matrix['FN'], epoch)
+
+
+    print(f"| {prefix} | Epoch {epoch+1} — Weighted Loss: {avg_weighted_loss:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f}, F1: {f1:.4f}")
+    print(f"| {prefix} | Confusion Matrix: TP={full_confusion_matrix['TP']}, TN={full_confusion_matrix['TN']}, FP={full_confusion_matrix['FP']}, FN={full_confusion_matrix['FN']}")
 
 
 # ----------------------
 # Training Loop
 # ----------------------
 def train_one_config(config):
-    run_name = config["run_name"]
+    run_name = config["run_name"]+"_"+time.strftime("_%Y%m%d_%H%M%S")
     log_dir = f"runs/{run_name}"
     save_dir = f"checkpoints/{run_name}"
     os.makedirs(save_dir, exist_ok=True)
@@ -168,7 +245,7 @@ def train_one_config(config):
     embedding_dim = config["embedding_dim"]
     model = build_model(config["modelArchitecture"], embedding_dim).to(device)
     optimizer = build_optimizer(config["optimizer"], model.parameters(), config["learning_rate"], config["optimizer_config"])
-    loss_fn = nn.BCEWithLogitsLoss(reduction='none')
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device))
 
     # ----------------------
     # Dataset and DataLoader
@@ -182,22 +259,29 @@ def train_one_config(config):
     real_train = real_pairs[:split_idx]
     real_val = real_pairs[split_idx:]
 
-    # 100% of fake pairs go to training
-    fake_train = dataset.fake_pairs
+    split_idx = int(0.9 * len(dataset.fake_pairs))
+    fake_train = dataset.fake_pairs[:split_idx]
+    fake_val = dataset.fake_pairs[split_idx:]
 
     # Create datasets with set_data
     train_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
     train_dataset.set_data(fake_train + real_train)
     val_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
-    val_dataset.set_data(real_val)
+    val_dataset.set_data(real_val[:int(len(real_val) * 0.5)])
+    val_fake_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
+    val_fake_dataset.set_data(fake_val+ real_val[int(len(real_val) * 0.5):])
 
     train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config["batch_size"])
+    val_fake_loader = DataLoader(val_fake_dataset, batch_size=config["batch_size"])
 
-    print(f"Training with {len(train_loader.dataset)} training samples and {len(val_loader.dataset)} validation samples.")
+    print(f"Training with {len(train_loader.dataset)} training samples, {len(val_loader.dataset)} real validation samples and {len(val_fake_loader.dataset)} fake&real validation samples.")
+
     print(f"Real pairs: {len(real_pairs)}, Fake pairs: {len(dataset.fake_pairs)}")
     print(f"Training on {len(real_train)} real pairs and {len(fake_train)} fake pairs.")
     print(f"Model architecture: {config['modelArchitecture']}, Optimizer: {config['optimizer']}, Learning rate: {config['learning_rate']}")
+
+
     print(f"\n----- Run name: {run_name} -----\n")
 
 
@@ -205,33 +289,36 @@ def train_one_config(config):
         model.train()
         total_loss = 0
         total_weighted_loss = 0
+        full_confusion_matrix = {
+            'TP': 0,
+            'TN': 0,
+            'FP': 0,
+            'FN': 0
+        }
 
         all_preds, all_labels = [], []
 
         loop = tqdm(train_loader, desc=f"Epoch {epoch+1} Train")
         for emb1, emb2, label in loop:
-            emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device)
+            emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device).view(-1)
 
             optimizer.zero_grad()
             logits = model(emb1, emb2).view(-1)
-            label = label.view(-1)
 
-            loss = loss_fn(logits, label)
-            preds = (logits > 0.5).float()
-
-            weights = torch.ones_like(label)
-            false_positive_mask = (label == 0) & (preds == 1)
-            weights[false_positive_mask] = config.get("false_positive_penalty", 1.0)
-            weighted_loss = (loss * weights).mean()
+            weighted_loss, preds, confusion_matrix = calculate_weighted_loss(
+                logits, label, loss_fn, false_positive_penalty=config.get("false_positive_penalty", 1.0)
+            )
 
             weighted_loss.backward()
             optimizer.step()
 
-            total_loss += loss.mean().item()
             total_weighted_loss += weighted_loss.item()
 
             all_preds.extend(preds.detach().cpu().numpy())
             all_labels.extend(label.detach().cpu().numpy())
+
+            for key in full_confusion_matrix:
+                full_confusion_matrix[key] += confusion_matrix[key]
 
             loop.set_postfix(weighted_loss=weighted_loss.item())
 
@@ -240,15 +327,20 @@ def train_one_config(config):
         f1 = f1_score(all_labels, all_preds, zero_division=0)
 
 
-        writer.add_scalar("Train/Loss", total_loss / len(train_loader), epoch)
         writer.add_scalar("Train/WeightedLoss", total_weighted_loss / len(train_loader), epoch)
         writer.add_scalar("Train/Precision", precision, epoch)
         writer.add_scalar("Train/Recall", recall, epoch)
         writer.add_scalar("Train/F1", f1, epoch)
+        writer.add_scalar("Train/confusion_matrix/TP", full_confusion_matrix['TP'], epoch)
+        writer.add_scalar("Train/confusion_matrix/TN", full_confusion_matrix['TN'], epoch)
+        writer.add_scalar("Train/confusion_matrix/FP", full_confusion_matrix['FP'], epoch)
+        writer.add_scalar("Train/confusion_matrix/FN", full_confusion_matrix['FN'], epoch)
 
         if (epoch + 1) % config.get("eval_every", 5) == 0:
+            print(f"Training | Confusion Matrix: TP={full_confusion_matrix['TP']}, TN={full_confusion_matrix['TN']}, FP={full_confusion_matrix['FP']}, FN={full_confusion_matrix['FN']}")
             print(f"Evaluating on validation set at epoch {epoch + 1}...")
-            eval_loop(model, val_loader, device, epoch, writer, prefix="Val")
+            eval_loop(model, val_loader, device, epoch, writer, prefix="Val", false_positive_penalty=config.get("false_positive_penalty", 1.0), BCEweight=config.get("BCEweight", 1.0))
+            eval_loop(model, val_fake_loader, device, epoch, writer, prefix="ValFake", false_positive_penalty=config.get("false_positive_penalty", 1.0), BCEweight=config.get("BCEweight", 1.0))
 
         # Optional: Save model checkpoint
         if (epoch + 1) % config.get("save_every", 50) == 0:

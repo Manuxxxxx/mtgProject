@@ -6,14 +6,15 @@
       "embedding_dim": 384,
       "batch_size": 128,
       "epochs": 300,
-      "learning_rate": 0.001,
+      "learning_rate": 0.0005,
       "optimizer": "Adam",
       "optimizer_config": {
         "weight_decay": 0.01
       },
       "modelArchitecture": "modelSimple",
       "save_every": 50,
-      "false_positive_penalty": 1.0
+      "false_positive_penalty": 1.0,
+      "BCEweight": 5.0
     },
     {
       "run_name": "complex_adamW_run",
@@ -29,7 +30,8 @@
       },
       "modelArchitecture": "modelComplex",
       "save_every": 50,
-      "false_positive_penalty": 5.0
+      "false_positive_penalty": 1.0,
+      "BCEweight": 5.0
     },
     {
       "run_name": "simple_sgd_run",
@@ -45,7 +47,8 @@
       },
       "modelArchitecture": "modelSimple",
       "save_every": 50,
-      "false_positive_penalty": 5.0
+      "false_positive_penalty": 1.0,
+      "BCEweight": 5.0
     }
     ,
     {
@@ -62,7 +65,8 @@
       },
       "modelArchitecture": "modelComplex",
       "save_every": 50,
-      "false_positive_penalty": 5.0
+      "false_positive_penalty": 1.0,
+      "BCEweight": 5.0
     }
   ]
   
