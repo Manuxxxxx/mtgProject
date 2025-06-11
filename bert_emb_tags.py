@@ -10,6 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 import os
 from tqdm import tqdm
 import conf
+import re
 
 import bert_parsing
 
@@ -226,66 +227,6 @@ def train_the_model():
 
     writer.close()
 
-def get_card_from_name(card_name):
-    with open(conf.embedding_file, "r", encoding="utf-8") as f:
-        cards = json.load(f)
-    for card in cards:
-        if card["name"] == card_name:
-            return card
-    return None
-
-def get_embedding_from_name(card_name, model, tokenizer, device):
-    card = get_card_from_name(card_name)
-    if card is not None:
-        text = bert_parsing.format_card_for_bert(card)
-        inputs = tokenizer(text, padding='max_length', truncation=True, max_length=MAX_LEN, return_tensors='pt')
-        input_ids = inputs['input_ids'].to(device)
-        attention_mask = inputs['attention_mask'].to(device)
-        with torch.no_grad():
-            outputs = model(input_ids, attention_mask)
-            return outputs.cpu().numpy()
-    else:
-        return None
-
-def create_embedding_file(label_file, output_file, checkpoint_file):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
-    model = BertEmbedRegressor(output_dim=EMBEDDING_DIM).to(device)
-    model.load_state_dict(torch.load(checkpoint_file))
-    model.eval()
-
-    with open(label_file, "r") as f:
-        data = json.load(f)
-
-    embedding_labels = []
-    faulting_cards = []
-
-    for commander in tqdm(data, desc="Processing commanders"):
-        commander_emb = get_embedding_from_name(commander["commander"], model, tokenizer, device)
-        if commander_emb is not None:
-            for label in tqdm(commander["labels"], desc=f"  {commander['commander']} labels", leave=False):
-                card = get_embedding_from_name(label["card2"]["name"], model, tokenizer, device)
-                if card is not None:
-                    embedding_labels.append({
-                        "card1": {"emb": commander_emb[0].tolist(), "name": commander["commander"]},
-                        "card2": {"emb": card[0].tolist(), "name": label["card2"]["name"]},
-                        "synergy": label["synergy"],
-                    })
-                else:
-                    faulting_cards.append(label["card2"]["name"])
-        else:
-            faulting_cards.append(commander["commander"])
-
-    print(f"\n❌ Faulting cards: {faulting_cards}")
-    print(f"✅ Found {len(embedding_labels)} valid embeddings.")
-
-    with open(output_file, "w") as f:
-        json.dump(embedding_labels, f, indent=2)
 
 if __name__ == "__main__":
-    #train_the_model()
-    create_embedding_file(
-        label_file="edhrec_data/labeled/combined_commander_synergy_data.json",
-        output_file="edhrec_data/labeled_emb/combined_commander_synergy_embeddings.json",
-        checkpoint_file="checkpoints/bert_embed_regression20250515-175957/model_epoch_12.pth"
-    )
+    train_the_model()

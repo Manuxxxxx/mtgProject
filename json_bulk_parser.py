@@ -126,7 +126,7 @@ if __name__ == "__main__":
     output_json = "commander_legal_cards" + date + ".json"  # Output file
     output_dir = "datasets/processed/"
 
-    sets_to_include = conf.sets_to_include
+    sets_to_include = conf.all_sets
 
     filter_commander_legal_cards(
         input_json, output_json, sets_to_include, indent=2, output_dir=output_dir

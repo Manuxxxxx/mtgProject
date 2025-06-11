@@ -2,7 +2,7 @@ import time
 import requests
 import json
 import conf
-import brotli
+from tqdm import tqdm
 
 
 def get_card_info(set_code, card_number, X_CSRF_Token, cookie, debug=False):
@@ -136,33 +136,6 @@ def get_card_info(set_code, card_number, X_CSRF_Token, cookie, debug=False):
         card_tagggins = data["data"]["card"]["taggings"]
         processed_tags = []
 
-        # 	"1": {
-        # 		"annotation": null,
-        # 		"subjectId": "88600bd4-4dcc-4788-bba4-78b6cf5ad8f8",
-        # 		"createdAt": "2025-01-24T06:04:52Z",
-        # 		"creatorId": "732149b0-331a-4527-9335-466be0314fdd",
-        # 		"foreignKey": "oracleId",
-        # 		"id": "ce7e1543-24dc-429b-9147-e2c021f37aca",
-        # 		"pendingRevisions": false,
-        # 		"type": "TAGGING",
-        # 		"status": "GOOD_STANDING",
-        # 		"weight": "MEDIAN",
-        # 		"tag": {
-        # 			"category": false,
-        # 			"createdAt": "2025-05-14T11:47:00Z",
-        # 			"creatorId": "1415a95b-0916-4a72-9643-142dbb5374c8",
-        # 			"id": "eeee4e98-b0c7-40ed-8d6d-5ebb2958ac15",
-        # 			"name": "energy generator",
-        # 			"namespace": "card",
-        # 			"pendingRevisions": false,
-        # 			"slug": "energy-generator",
-        # 			"status": "GOOD_STANDING",
-        # 			"type": "ORACLE_CARD_TAG",
-        # 			"ancestorTags": []
-        # 		}
-        # 	}
-        # }
-
         for tag_superObj in card_tagggins:
             tag_obj = tag_superObj["tag"]
             if tag_obj["type"] == "ORACLE_CARD_TAG":
@@ -184,7 +157,7 @@ def get_card_info(set_code, card_number, X_CSRF_Token, cookie, debug=False):
 
         return processed_tags
     except requests.exceptions.RequestException as e:
-        print(f"Request failed: {e}")
+        # print(f"Request failed: {e}")
         return None
 
 
@@ -235,7 +208,7 @@ def get_unprocessed_cards(sets_to_process, already_processed):
                 unprocessed[set_code] = {"collector_number": unprocessed_cards}
 
     return unprocessed
-
+from tqdm import tqdm
 
 def get_remaining_cards(cards_to_process, X_CSRF_Token, cookie, storage_file):
     # Load existing progress
@@ -245,8 +218,8 @@ def get_remaining_cards(cards_to_process, X_CSRF_Token, cookie, storage_file):
     save_counter = 0
     batch_size = 30  # Save after every 30 cards
 
-    for set_code in cards_to_process:
-        print(f"Processing set {set_code}")
+    for set_code in tqdm(cards_to_process, desc="Processing sets", unit="set"):
+        # print(f"Processing set {set_code}")
         cards_processed = []
         cards_not_processed = []
 
@@ -255,8 +228,8 @@ def get_remaining_cards(cards_to_process, X_CSRF_Token, cookie, storage_file):
             key=lambda x: int(x) if x.isdigit() else float("inf")
         )
 
-        for card_number in cards_to_process[set_code]["collector_number"]:
-            print(f"Processing card {card_number} from set {set_code}")
+        for card_number in tqdm(cards_to_process[set_code]["collector_number"], desc=f"Processing cards in {set_code}", unit="card"):
+            # print(f"Processing card {card_number} from set {set_code}")
 
             # Get card info
             card_info = get_card_info(
@@ -282,7 +255,7 @@ def get_remaining_cards(cards_to_process, X_CSRF_Token, cookie, storage_file):
                 if save_counter >= batch_size:
                     with open(storage_file, "w") as file:
                         json.dump(processed_obj, file, indent=2)
-                    print(f"Saved progress after {save_counter} cards")
+                    # print(f"Saved progress after {save_counter} cards")
                     save_counter = 0
             else:
                 cards_not_processed.append(card_number)
@@ -307,7 +280,7 @@ if __name__ == "__main__":
     storage_file = conf.scrapped_store
     bulk_file = conf.bulk_file
     output_scrapped_dir = conf.output_scrapped_dir
-    sets_to_include = conf.sets_to_include
+    sets_to_include = conf.all_sets
     X_CSRF_Token = conf.X_CSRF_Token
     cookie = conf.cookie
 
