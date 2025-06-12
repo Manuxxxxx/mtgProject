@@ -13,11 +13,14 @@ from sklearn.metrics import precision_score, recall_score, f1_score, confusion_m
 from torch.utils.data import Subset
 import time
 import sys
+from torch.amp import autocast, GradScaler
 
 from synergy_model import build_model, calculate_weighted_loss, eval_loop, build_optimizer
 from bert_emb_tags import BertEmbedRegressor
 
 import bert_parsing
+
+scaler = GradScaler(device='cuda')
 
 def set_seed(seed: int = 42):
     random.seed(seed)                      # Python random module
@@ -34,12 +37,13 @@ def set_seed(seed: int = 42):
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
-    def __init__(self, synergy_data, card_data, tokenizer):
+    def __init__(self, synergy_data, card_data, tokenizer, max_length=320):
         synergy_data = json.load(open(synergy_data, 'r'))
         card_data = json.load(open(card_data, 'r'))
         self.synergy_data = synergy_data
         self.tokenizer = tokenizer
         self.card_lookup = build_card_lookup(card_data)
+        self.max_length = max_length
 
     def __len__(self):
         return len(self.synergy_data)
@@ -60,11 +64,11 @@ class JointCardDataset(Dataset):
 
         inputs1 = self.tokenizer(
             bert_parsing.format_card_for_bert(card1),
-            padding='max_length', truncation=True, max_length=320, return_tensors='pt'
+            padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt'
         )
         inputs2 = self.tokenizer(
             bert_parsing.format_card_for_bert(card2),
-            padding='max_length', truncation=True, max_length=320, return_tensors='pt'
+            padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt'
         )
         label = torch.tensor([entry.get('synergy', 0)], dtype=torch.float)
         return {
@@ -180,35 +184,40 @@ def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch,
         attention_mask2 = batch['attention_mask2'].to(device)
         labels = batch['label'].to(device)
 
-        # Get BERT embeddings for both cards
-        embed1 = bert_model(input_ids1, attention_mask1)
-        embed2 = bert_model(input_ids2, attention_mask2)
+        with autocast(device_type='cuda'):
+            # Get BERT embeddings for both cards
+            embed1 = bert_model(input_ids1, attention_mask1)
+            embed2 = bert_model(input_ids2, attention_mask2)
 
-        # Forward pass through synergy model
-        logits = synergy_model(embed1, embed2)
+            # Forward pass through synergy model
+            logits = synergy_model(embed1, embed2)
 
-        weighted_loss, preds, _ = calculate_weighted_loss(
-            logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
-        )
+            weighted_loss, preds, _ = calculate_weighted_loss(
+                logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
+            )
 
-        # Normalize loss for gradient accumulation
-        weighted_loss = weighted_loss / accumulation_steps
-        weighted_loss.backward()
+            # Normalize loss for gradient accumulation
+            loss_scaled = weighted_loss / accumulation_steps
+
+        # AMP backward pass
+        scaler.scale(loss_scaled).backward()
 
         if (step + 1) % accumulation_steps == 0:
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             optimizer.zero_grad()
 
             if use_empty_cache:
-                torch.cuda.empty_cache()  # Helps reduce fragmentation (optional)
+                torch.cuda.empty_cache()
 
-        total_loss += weighted_loss.item() * accumulation_steps  # Unscale loss for logging
+        total_loss += weighted_loss.item()  # already scaled back for logging
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy().astype(int))
 
-    # Final optimizer step if needed (in case dataset size isn't divisible by accumulation_steps)
+    # Final step if dataset isn't divisible by accumulation_steps
     if (step + 1) % accumulation_steps != 0:
-        optimizer.step()
+        scaler.step(optimizer)
+        scaler.update()
         optimizer.zero_grad()
 
     avg_loss = total_loss / len(dataloader)
@@ -218,21 +227,19 @@ def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch,
     cm = confusion_matrix(all_labels, all_preds)
 
     print(f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}")
-    print(f"Train | Confusion Matrix (scikit-learn):\n{cm}")
-    print(f"Total | TP: {np.sum(cm[1, 1])}, TN: {np.sum(cm[0, 0])}, "
-          f"FP: {np.sum(cm[0, 1])}, FN: {np.sum(cm[1, 0])}")
+    print(f"Train | Confusion Matrix:\n{cm}")
+    print(f"Total | TP: {cm[1,1]}, TN: {cm[0,0]}, FP: {cm[0,1]}, FN: {cm[1,0]}")
     
     writer.add_scalar("Train/Loss", avg_loss, epoch)
     writer.add_scalar("Train/Precision", precision, epoch)
     writer.add_scalar("Train/Recall", recall, epoch)
     writer.add_scalar("Train/F1", f1, epoch)
-    writer.add_scalar("Train/TP", np.sum(cm[1, 1]), epoch)
-    writer.add_scalar("Train/TN", np.sum(cm[0, 0]), epoch)
-    writer.add_scalar("Train/FP", np.sum(cm[0, 1]), epoch)
-    writer.add_scalar("Train/FN", np.sum(cm[1, 0]), epoch)
+    writer.add_scalar("Train/TP", cm[1,1], epoch)
+    writer.add_scalar("Train/TN", cm[0,0], epoch)
+    writer.add_scalar("Train/FP", cm[0,1], epoch)
+    writer.add_scalar("Train/FN", cm[1,0], epoch)
 
     return avg_loss, precision, recall, f1, cm
-
 def eval_loop(bert_model, synergy_model, dataloader, loss_fn, epoch, writer, device, label="Val", false_positive_penalty=1.0):
     bert_model.eval()
     synergy_model.eval()
@@ -350,7 +357,7 @@ def train_joint_model(config):
 
     tokenizer = BertTokenizer.from_pretrained(config["bert_model_name"])
     # Step 2: Build full dataset and wrap in Subsets
-    full_dataset = JointCardDataset(config["synergy_file"], config["bulk_file"], tokenizer)
+    full_dataset = JointCardDataset(config["synergy_file"], config["bulk_file"], tokenizer, config["max_length_bert_tokenizer"])
 
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_real_indices)
@@ -388,7 +395,7 @@ def train_joint_model(config):
     optimizer, loss_fn = build_training_components(config, bert_model, synergy_model, device)
 
     for epoch in tqdm(range(config["epochs"]), desc="Epochs"):
-        train_loop(bert_model,synergy_model, train_loader, optimizer, loss_fn, epoch, writer, device)
+        train_loop(bert_model,synergy_model, train_loader, optimizer, loss_fn, epoch, writer, device, accumulation_steps=config["accumulation_steps"],use_empty_cache=config.get("use_empty_cache", False))
         eval_loop(bert_model,synergy_model, val_loader, loss_fn, epoch, writer, device, label="Val Real")
         eval_loop(bert_model,synergy_model, val_fake_loader, loss_fn, epoch, writer, device, label="Val Fake+Real")
 
