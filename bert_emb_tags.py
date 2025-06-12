@@ -60,9 +60,9 @@ class CardDataset(Dataset):
 # Model
 # ----------------------
 class BertEmbedRegressor(nn.Module):
-    def __init__(self, output_dim):
+    def __init__(self, output_dim, model_name=MODEL_NAME):
         super().__init__()
-        self.bert = BertModel.from_pretrained(MODEL_NAME)
+        self.bert = BertModel.from_pretrained(model_name)
         self.dropout = nn.Dropout(0.2)
         self.linear = nn.Linear(self.bert.config.hidden_size, output_dim)
 

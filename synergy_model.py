@@ -230,125 +230,130 @@ def eval_loop(model, dataloader, device, epoch, writer, prefix="Val", false_posi
     print(f"| {prefix} | Confusion Matrix: TP={full_confusion_matrix['TP']}, TN={full_confusion_matrix['TN']}, FP={full_confusion_matrix['FP']}, FN={full_confusion_matrix['FN']}")
 
 
-# ----------------------
-# Training Loop
-# ----------------------
-def train_one_config(config):
-    run_name = config["run_name"]+"_"+time.strftime("_%Y%m%d_%H%M%S")
+def initialize_run_dirs(config):
+    run_name = config["run_name"] + "_" + time.strftime("_%Y%m%d_%H%M%S")
     log_dir = f"runs/{run_name}"
     save_dir = f"checkpoints/{run_name}"
     os.makedirs(save_dir, exist_ok=True)
+    return run_name, log_dir, save_dir
 
-    writer = SummaryWriter(log_dir)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    embedding_dim = config["embedding_dim"]
-    model = build_model(config["modelArchitecture"], embedding_dim).to(device)
+def build_training_components(config, device):
+    model = build_model(config["modelArchitecture"], config["embedding_dim"]).to(device)
     optimizer = build_optimizer(config["optimizer"], model.parameters(), config["learning_rate"], config["optimizer_config"])
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device))
+    return model, optimizer, loss_fn
 
-    # ----------------------
-    # Dataset and DataLoader
-    # ----------------------
+
+def prepare_dataloaders(config):
     dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
 
-    # Shuffle and split real pairs (80/20)
     real_pairs = dataset.real_pairs
     random.shuffle(real_pairs)
-    split_idx = int(0.8 * len(real_pairs))
-    real_train = real_pairs[:split_idx]
-    real_val = real_pairs[split_idx:]
+    split_real = int(0.8 * len(real_pairs))
+    real_train, real_val = real_pairs[:split_real], real_pairs[split_real:]
 
-    split_idx = int(0.9 * len(dataset.fake_pairs))
-    fake_train = dataset.fake_pairs[:split_idx]
-    fake_val = dataset.fake_pairs[split_idx:]
+    split_fake = int(0.9 * len(dataset.fake_pairs))
+    fake_train, fake_val = dataset.fake_pairs[:split_fake], dataset.fake_pairs[split_fake:]
 
-    # Create datasets with set_data
     train_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
     train_dataset.set_data(fake_train + real_train)
+
     val_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
     val_dataset.set_data(real_val[:int(len(real_val) * 0.5)])
+
     val_fake_dataset = SynergyDataset(config["synergy_file"], config["embedding_file"])
-    val_fake_dataset.set_data(fake_val+ real_val[int(len(real_val) * 0.5):])
+    val_fake_dataset.set_data(fake_val + real_val[int(len(real_val) * 0.5):])
 
     train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=config["batch_size"])
     val_fake_loader = DataLoader(val_fake_dataset, batch_size=config["batch_size"])
 
+    return train_loader, val_loader, val_fake_loader
+
+
+def print_training_summary(train_loader, val_loader, val_fake_loader, config, run_name):
     print(f"Training with {len(train_loader.dataset)} training samples, {len(val_loader.dataset)} real validation samples and {len(val_fake_loader.dataset)} fake&real validation samples.")
-
-    print(f"Real pairs: {len(real_pairs)}, Fake pairs: {len(dataset.fake_pairs)}")
-    print(f"Training on {len(real_train)} real pairs and {len(fake_train)} fake pairs.")
     print(f"Model architecture: {config['modelArchitecture']}, Optimizer: {config['optimizer']}, Learning rate: {config['learning_rate']}")
-
-
     print(f"\n----- Run name: {run_name} -----\n")
 
 
+def train_one_epoch(model, train_loader, optimizer, loss_fn, writer, device, epoch, config):
+    model.train()
+    total_weighted_loss = 0
+    all_preds, all_labels = [], []
+    confusion_matrix = {'TP': 0, 'TN': 0, 'FP': 0, 'FN': 0}
+
+    loop = tqdm(train_loader, desc=f"Epoch {epoch + 1} Train")
+    for emb1, emb2, label in loop:
+        emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device).view(-1)
+
+        optimizer.zero_grad()
+        logits = model(emb1, emb2).view(-1)
+
+        weighted_loss, preds, cm = calculate_weighted_loss(
+            logits, label, loss_fn, false_positive_penalty=config.get("false_positive_penalty", 1.0)
+        )
+
+        weighted_loss.backward()
+        optimizer.step()
+
+        total_weighted_loss += weighted_loss.item()
+        all_preds.extend(preds.detach().cpu().numpy())
+        all_labels.extend(label.detach().cpu().numpy())
+
+        for key in confusion_matrix:
+            confusion_matrix[key] += cm[key]
+
+        loop.set_postfix(weighted_loss=weighted_loss.item())
+
+    log_training_metrics(writer, epoch, total_weighted_loss, train_loader, all_labels, all_preds, confusion_matrix)
+
+
+def log_training_metrics(writer, epoch, total_loss, loader, labels, preds, confusion_matrix):
+    writer.add_scalar("Train/WeightedLoss", total_loss / len(loader), epoch)
+    writer.add_scalar("Train/Precision", precision_score(labels, preds, zero_division=0), epoch)
+    writer.add_scalar("Train/Recall", recall_score(labels, preds, zero_division=0), epoch)
+    writer.add_scalar("Train/F1", f1_score(labels, preds, zero_division=0), epoch)
+
+    for k, v in confusion_matrix.items():
+        writer.add_scalar(f"Train/confusion_matrix/{k}", v, epoch)
+
+    print(f"Training | Confusion Matrix: TP={confusion_matrix['TP']}, TN={confusion_matrix['TN']}, FP={confusion_matrix['FP']}, FN={confusion_matrix['FN']}")
+
+def save_model(model, save_dir, epoch):
+    save_path = os.path.join(save_dir, f"model_epoch_{epoch+1}.pth")
+    torch.save(model.state_dict(), save_path)
+    print(f"Saved model to {save_path}")
+
+# ----------------------
+# Training Loop
+# ----------------------
+def train_one_config(config):
+    run_name, log_dir, save_dir = initialize_run_dirs(config)
+    writer = SummaryWriter(log_dir)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, optimizer, loss_fn = build_training_components(config, device)
+
+    train_loader, val_loader, val_fake_loader = prepare_dataloaders(config)
+    
+    print_training_summary(train_loader, val_loader, val_fake_loader, config, run_name)
+
     for epoch in range(config["epochs"]):
-        model.train()
-        total_loss = 0
-        total_weighted_loss = 0
-        full_confusion_matrix = {
-            'TP': 0,
-            'TN': 0,
-            'FP': 0,
-            'FN': 0
-        }
-
-        all_preds, all_labels = [], []
-
-        loop = tqdm(train_loader, desc=f"Epoch {epoch+1} Train")
-        for emb1, emb2, label in loop:
-            emb1, emb2, label = emb1.to(device), emb2.to(device), label.to(device).view(-1)
-
-            optimizer.zero_grad()
-            logits = model(emb1, emb2).view(-1)
-
-            weighted_loss, preds, confusion_matrix = calculate_weighted_loss(
-                logits, label, loss_fn, false_positive_penalty=config.get("false_positive_penalty", 1.0)
-            )
-
-            weighted_loss.backward()
-            optimizer.step()
-
-            total_weighted_loss += weighted_loss.item()
-
-            all_preds.extend(preds.detach().cpu().numpy())
-            all_labels.extend(label.detach().cpu().numpy())
-
-            for key in full_confusion_matrix:
-                full_confusion_matrix[key] += confusion_matrix[key]
-
-            loop.set_postfix(weighted_loss=weighted_loss.item())
-
-        precision = precision_score(all_labels, all_preds, zero_division=0)
-        recall = recall_score(all_labels, all_preds, zero_division=0)
-        f1 = f1_score(all_labels, all_preds, zero_division=0)
-
-
-        writer.add_scalar("Train/WeightedLoss", total_weighted_loss / len(train_loader), epoch)
-        writer.add_scalar("Train/Precision", precision, epoch)
-        writer.add_scalar("Train/Recall", recall, epoch)
-        writer.add_scalar("Train/F1", f1, epoch)
-        writer.add_scalar("Train/confusion_matrix/TP", full_confusion_matrix['TP'], epoch)
-        writer.add_scalar("Train/confusion_matrix/TN", full_confusion_matrix['TN'], epoch)
-        writer.add_scalar("Train/confusion_matrix/FP", full_confusion_matrix['FP'], epoch)
-        writer.add_scalar("Train/confusion_matrix/FN", full_confusion_matrix['FN'], epoch)
+        train_one_epoch(
+            model, train_loader, optimizer, loss_fn, writer, device, epoch, config
+        )
 
         if (epoch + 1) % config.get("eval_every", 5) == 0:
-            print(f"Training | Confusion Matrix: TP={full_confusion_matrix['TP']}, TN={full_confusion_matrix['TN']}, FP={full_confusion_matrix['FP']}, FN={full_confusion_matrix['FN']}")
-            print(f"Evaluating on validation set at epoch {epoch + 1}...")
-            eval_loop(model, val_loader, device, epoch, writer, prefix="Val", false_positive_penalty=config.get("false_positive_penalty", 1.0), BCEweight=config.get("BCEweight", 1.0))
-            eval_loop(model, val_fake_loader, device, epoch, writer, prefix="ValFake", false_positive_penalty=config.get("false_positive_penalty", 1.0), BCEweight=config.get("BCEweight", 1.0))
+            eval_loop(model, val_loader, device, epoch, writer, "Val", config.get("false_positive_penalty", 1.0), config.get("BCEweight", 1.0))
+            eval_loop(model, val_fake_loader, device, epoch, writer, "ValFake", config.get("false_positive_penalty", 1.0), config.get("BCEweight", 1.0))
 
-        # Optional: Save model checkpoint
         if (epoch + 1) % config.get("save_every", 50) == 0:
-            save_path = os.path.join(save_dir, f"model_epoch_{epoch+1}.pth")
-            torch.save(model.state_dict(), save_path)
-            print(f"Saved model to {save_path}")
+            save_model(model, save_dir, epoch)
 
     writer.close()
+
 
 
 # ----------------------
