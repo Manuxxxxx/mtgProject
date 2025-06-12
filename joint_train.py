@@ -163,20 +163,22 @@ def build_joint_optimizer(optimizer_name, bert_model, synergy_model, bert_lr, sy
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 
-def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch, writer, device, false_positive_penalty=1.0):
+def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch, writer, device, 
+               false_positive_penalty=1.0, accumulation_steps=1, use_empty_cache=False):
+
     bert_model.train()
     synergy_model.train()
     total_loss = 0.0
     all_preds, all_labels = [], []
 
-    for batch in tqdm(dataloader, desc="Train"):
+    optimizer.zero_grad()
+    
+    for step, batch in enumerate(tqdm(dataloader, desc="Train")):
         input_ids1 = batch['input_ids1'].to(device)
         attention_mask1 = batch['attention_mask1'].to(device)
         input_ids2 = batch['input_ids2'].to(device)
         attention_mask2 = batch['attention_mask2'].to(device)
         labels = batch['label'].to(device)
-
-        optimizer.zero_grad()
 
         # Get BERT embeddings for both cards
         embed1 = bert_model(input_ids1, attention_mask1)
@@ -189,12 +191,25 @@ def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch,
             logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
         )
 
+        # Normalize loss for gradient accumulation
+        weighted_loss = weighted_loss / accumulation_steps
         weighted_loss.backward()
-        optimizer.step()
 
-        total_loss += weighted_loss.item()
+        if (step + 1) % accumulation_steps == 0:
+            optimizer.step()
+            optimizer.zero_grad()
+
+            if use_empty_cache:
+                torch.cuda.empty_cache()  # Helps reduce fragmentation (optional)
+
+        total_loss += weighted_loss.item() * accumulation_steps  # Unscale loss for logging
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy().astype(int))
+
+    # Final optimizer step if needed (in case dataset size isn't divisible by accumulation_steps)
+    if (step + 1) % accumulation_steps != 0:
+        optimizer.step()
+        optimizer.zero_grad()
 
     avg_loss = total_loss / len(dataloader)
     precision = precision_score(all_labels, all_preds, zero_division=0)
@@ -296,9 +311,9 @@ def train_joint_model(config):
 
     # Define split proportions
     splits = {
-        "train": {"real": 0.8, "fake": 0.2},
+        "train": {"real": 0.8, "fake": 0.1},
         "val_real": {"real": 0.1, "fake": 0.0},
-        "val_real_fake": {"real": 0.1, "fake": 0.05}
+        "val_real_fake": {"real": 0.1, "fake": 0.03}
     }
 
 
