@@ -1,13 +1,13 @@
 import re
 import torch
 import json
-from synergy_model import SynergyClassifier  # your binary model
+from synergy_model import ModelComplex  # your binary model
 from tqdm import tqdm
 import random
 
 # Configuration
 EMBEDDING_DIM = 384
-CHECKPOINT_FILE = "checkpoints/synergy_classifier_20250611-183940/model_epoch_36.pth"
+CHECKPOINT_FILE = "checkpoints/complex_sgd_run__20250611_234500/model_epoch_250.pth"
 BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/all_commander_legal_cards20250609112722.json"
 TOP_N = 30  # how many cards to recommend
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,90 +70,12 @@ def decklist_to_array(decklist):
 
 if __name__ == "__main__":
     deck = """1 Aetherflux Reservoir
-1 Agadeem's Awakening
-1 Alhammarret's Archive
-1 Anguished Unmaking
-1 Arcane Signet
-1 Archaeomancer's Map
-1 Arguel's Blood Fast
-1 Auriok Champion
 1 Authority of the Consuls
 1 Black Market Connections
 1 Blind Obedience
 1 Bloodchief Ascension
-1 Bojuka Bog
-1 Bolas's Citadel
-1 Cabal Coffers
-1 Castle Locthwain
-1 Caves of Koilos
-1 Celestine, the Living Saint
-1 Children of Korlis
 1 Cleric Class
-1 Command Tower
-1 Crypt Ghast
-1 Debt to the Deathless
-1 Demonic Tutor
-1 Despark
-1 Erebos, God of the Dead
-1 Exotic Orchard
-1 Exquisite Blood
-1 Farewell
-1 Felidar Sovereign
-1 Fellwar Stone
-1 Fetid Heath
-1 Final Showdown
-1 Generous Gift
-1 Godless Shrine
-1 Gray Merchant of Asphodel
-1 Heliod, Sun-Crowned
-1 Heliod's Intervention
-1 Insatiable Avarice
-1 Isolated Chapel
-1 Kambal, Consul of Allocation
-1 Karlov of the Ghost Council
-1 Liesa, Forgotten Archangel
-1 Lightning Greaves
-1 Lotho, Corrupt Shirriff
-1 Necropotence
-1 Orzhov Signet
-1 Phyrexian Arena
-1 Priest of Fell Rites
-1 Reanimate
-1 Reliquary Tower
-1 Resplendent Angel
-1 Rhox Faithmender
-1 Rodolf Duskbringer
-1 Sanguine Bond
-1 Scoured Barrens
-1 Seraph Sanctuary
-1 Serra Paragon
-1 Shadowspear
-1 Shattered Sanctum
-1 Silent Clearing
-1 Smothering Tithe
-1 Sol Ring
-1 Solemn Simulacrum
-1 Sorin Markov
-1 Soul Warden
-1 Soul's Attendant
-1 Suture Priest
-1 Swords to Plowshares
-1 Tainted Field
-1 Tainted Sigil
-1 Takenuma, Abandoned Mire
-1 Talisman of Hierarchy
-1 Teferi's Protection
-1 Test of Endurance
-1 The Book of Exalted Deeds
-1 Toxic Deluge
-1 Urborg, Tomb of Yawgmoth
-1 Vault of Champions
-1 Vault of the Archangel
-1 Vilis, Broker of Blood
-1 Vito, Thorn of the Dusk Rose
-1 Vizkopa Guildmage
-1 Well of Lost Dreams
-1 Liesa, Shroud of Dusk"""
+"""
     current_deck = decklist_to_array(deck)
     #get 30 cards from the deck at random
     if len(current_deck) > 30:
@@ -165,7 +87,7 @@ if __name__ == "__main__":
     all_embeddings = load_embeddings(BULK_EMBEDDING_FILE)
 
     print(" Loading model...")
-    model = SynergyClassifier(EMBEDDING_DIM).to(DEVICE)
+    model = ModelComplex(EMBEDDING_DIM).to(DEVICE)
     model.load_state_dict(torch.load(CHECKPOINT_FILE))
     model.eval()
 

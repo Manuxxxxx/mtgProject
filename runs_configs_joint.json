@@ -1,0 +1,55 @@
+  [
+    {
+      "run_name": "complex_noTrainBertMini_AdamW",
+      "bert_checkpoint": "",
+      "bert_model_name": "distilbert-base-uncased",
+      "embedding_dim": 384,
+      "max_length_bert_tokenizer": 256,
+      "synergy_arch": "modelComplex",
+      "synergy_learning_rate": 1e-4,
+      "bert_learning_rate": 2e-5,
+      "optimizer": "AdamW",
+      "optimizer_config": {
+        "weight_decay": 0.01
+      },
+      "epochs": 30,
+      "batch_size": 5,
+      "accumulation_steps": 2,
+      "use_empty_cache": false,
+      "eval_every": 1,
+      "save_every": 1,
+      "BCEweight": 1.0,
+      "false_positive_penalty": 1.0,
+      "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
+      "bulk_file": "datasets/processed/indent/commander_legal_cards20250609112722.json",
+      "log_dir": "runs/joint_training",
+      "save_dir": "checkpoints/joint_training"
+    },
+    {
+      "run_name": "complex_preTrainBert_AdamW",
+      "bert_checkpoint": "checkpoints/bert_embed_regression20250515-175957/model_epoch_12.pth",
+      "bert_model_name": "bert-base-uncased",
+      "embedding_dim": 384,
+      "max_length_bert_tokenizer": 280,
+      "synergy_arch": "modelComplex",
+      "synergy_learning_rate": 1e-4,
+      "bert_learning_rate": 2e-5,
+      "optimizer": "AdamW",
+      "optimizer_config": {
+        "weight_decay": 0.01
+      },
+      "epochs": 30,
+      "batch_size": 6,
+      "accumulation_steps": 4,
+      "use_empty_cache": true,
+      "eval_every": 1,
+      "save_every": 1,
+      "BCEweight": 1.0,
+      "false_positive_penalty": 1.0,
+      "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
+      "bulk_file": "datasets/processed/indent/commander_legal_cards20250609112722.json",
+      "log_dir": "runs/joint_training",
+      "save_dir": "checkpoints/joint_training"
+    }
+  ]
+    

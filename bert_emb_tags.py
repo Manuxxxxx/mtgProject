@@ -3,6 +3,8 @@ import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 from transformers import BertTokenizer, BertModel
+from transformers import AutoModel, AutoModelForMaskedLM
+from transformers import DistilBertModel, DistilBertTokenizer
 import json
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -62,14 +64,28 @@ class CardDataset(Dataset):
 class BertEmbedRegressor(nn.Module):
     def __init__(self, output_dim, model_name=MODEL_NAME):
         super().__init__()
-        self.bert = BertModel.from_pretrained(model_name)
+        if model_name == "bert-base-uncased":
+            print("Using BertModel")
+            self.bert = BertModel.from_pretrained("bert-base-uncased")
+        elif model_name == "distilbert-base-uncased":
+            print("Using DistilBertModel")
+            self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
         self.dropout = nn.Dropout(0.2)
         self.linear = nn.Linear(self.bert.config.hidden_size, output_dim)
+        self.model_name = model_name
 
     def forward(self, input_ids, attention_mask):
         outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
-        pooled = outputs.pooler_output
-        return self.linear(self.dropout(pooled))
+
+        if self.model_name == "distilbert-base-uncased":
+            cls_emb = outputs.last_hidden_state[:, 0, :]
+            return self.linear(self.dropout(cls_emb))
+        elif self.model_name == "bert-base-uncased":
+            pooled = outputs.pooler_output
+            return self.linear(self.dropout(pooled))
+        else:
+            #error handling for unsupported models
+            raise ValueError(f"Model {self.model_name} is not supported for this task.")
 
 # ----------------------
 # Training Utilities with tqdm

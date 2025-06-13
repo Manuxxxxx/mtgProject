@@ -8,6 +8,8 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from transformers import BertTokenizer, BertModel
+from transformers import AutoTokenizer, AutoModel
+from transformers import DistilBertModel, DistilBertTokenizer
 import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
 from torch.utils.data import Subset
@@ -15,15 +17,19 @@ import time
 import sys
 from torch.amp import autocast, GradScaler
 
-from synergy_model import build_model, calculate_weighted_loss, eval_loop, build_optimizer
+from synergy_model import (
+    build_model,
+    calculate_weighted_loss,
+    eval_loop,
+    build_optimizer,
+)
 from bert_emb_tags import BertEmbedRegressor
 
 import bert_parsing
 
-scaler = GradScaler(device='cuda')
 
 def set_seed(seed: int = 42):
-    random.seed(seed)                      # Python random module
+    random.seed(seed)  # Python random module
     # np.random.seed(seed)                   # NumPy
     # torch.manual_seed(seed)                # PyTorch CPU
     # torch.cuda.manual_seed(seed)           # PyTorch GPU
@@ -33,13 +39,14 @@ def set_seed(seed: int = 42):
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
 
+
 # ------------------------
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
     def __init__(self, synergy_data, card_data, tokenizer, max_length=320):
-        synergy_data = json.load(open(synergy_data, 'r'))
-        card_data = json.load(open(card_data, 'r'))
+        synergy_data = json.load(open(synergy_data, "r"))
+        card_data = json.load(open(card_data, "r"))
         self.synergy_data = synergy_data
         self.tokenizer = tokenizer
         self.card_lookup = build_card_lookup(card_data)
@@ -47,38 +54,45 @@ class JointCardDataset(Dataset):
 
     def __len__(self):
         return len(self.synergy_data)
-    
-    
+
     def __getitem__(self, idx):
         entry = self.synergy_data[idx]
-        card1 = self.find_card_by_name(entry['card1']['name'])
-        card2 = self.find_card_by_name(entry['card2']['name'])
+        card1 = self.find_card_by_name(entry["card1"]["name"])
+        card2 = self.find_card_by_name(entry["card2"]["name"])
 
         if card1 is None or card2 is None:
-            raise ValueError(f"Missing cards: {entry['card1']['name']} or {entry['card2']['name']}")
+            raise ValueError(
+                f"Missing cards: {entry['card1']['name']} or {entry['card2']['name']}"
+            )
 
-
-        
         if not card1 or not card2:
-            raise ValueError(f"Card not found for entry {idx}: {entry['card1']['name']} or {entry['card2']['name']}")
+            raise ValueError(
+                f"Card not found for entry {idx}: {entry['card1']['name']} or {entry['card2']['name']}"
+            )
 
         inputs1 = self.tokenizer(
             bert_parsing.format_card_for_bert(card1),
-            padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt'
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt",
         )
         inputs2 = self.tokenizer(
             bert_parsing.format_card_for_bert(card2),
-            padding='max_length', truncation=True, max_length=self.max_length, return_tensors='pt'
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt",
         )
-        label = torch.tensor([entry.get('synergy', 0)], dtype=torch.float)
+        label = torch.tensor([entry.get("synergy", 0)], dtype=torch.float)
         return {
-            'input_ids1': inputs1['input_ids'].squeeze(0),
-            'attention_mask1': inputs1['attention_mask'].squeeze(0),
-            'input_ids2': inputs2['input_ids'].squeeze(0),
-            'attention_mask2': inputs2['attention_mask'].squeeze(0),
-            'label': label
+            "input_ids1": inputs1["input_ids"].squeeze(0),
+            "attention_mask1": inputs1["attention_mask"].squeeze(0),
+            "input_ids2": inputs2["input_ids"].squeeze(0),
+            "attention_mask2": inputs2["attention_mask"].squeeze(0),
+            "label": label,
         }
-    
+
     def find_card_by_name(self, name):
         # Try exact match first
         card = self.card_lookup.get(name)
@@ -90,11 +104,12 @@ class JointCardDataset(Dataset):
                 return card_data
         # Not found
         return None
-    
+
+
 def build_card_lookup(card_data):
     """
     Build a dictionary mapping card names to their full data.
-    
+
     Args:
         card_data (list): List of card dictionaries, each with a 'name' key.
 
@@ -108,9 +123,9 @@ def build_card_lookup(card_data):
     for i, card in enumerate(card_data):
         if not isinstance(card, dict):
             raise TypeError(f"Item at index {i} is not a dict: {card!r}")
-        if 'name' not in card:
+        if "name" not in card:
             raise KeyError(f"Missing 'name' key in card at index {i}: {card!r}")
-        card_lookup[card['name']] = card
+        card_lookup[card["name"]] = card
 
     return card_lookup
 
@@ -121,7 +136,7 @@ def get_real_fake_indices(synergy_file):
     Real = contains "synergy_edhrec"
     Fake = does not contain it and synergy == 0
     """
-    with open(synergy_file, 'r') as f:
+    with open(synergy_file, "r") as f:
         data = json.load(f)
 
     real_indices = []
@@ -135,6 +150,7 @@ def get_real_fake_indices(synergy_file):
 
     return real_indices, fake_indices
 
+
 def build_training_components(config, bert_model, synergy_model, device):
     optimizer = build_joint_optimizer(
         config["optimizer"],
@@ -142,19 +158,22 @@ def build_training_components(config, bert_model, synergy_model, device):
         synergy_model,
         config["bert_learning_rate"],
         config["synergy_learning_rate"],
-        config.get("optimizer_config", {})
+        config.get("optimizer_config", {}),
     )
-    
+
     loss_fn = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device)
     )
 
     return optimizer, loss_fn
 
-def build_joint_optimizer(optimizer_name, bert_model, synergy_model, bert_lr, synergy_lr, optimizer_config):
+
+def build_joint_optimizer(
+    optimizer_name, bert_model, synergy_model, bert_lr, synergy_lr, optimizer_config
+):
     param_groups = [
-        {'params': bert_model.parameters(), 'lr': bert_lr},
-        {'params': synergy_model.parameters(), 'lr': synergy_lr}
+        {"params": bert_model.parameters(), "lr": bert_lr},
+        {"params": synergy_model.parameters(), "lr": synergy_lr},
     ]
 
     if optimizer_name == "Adam":
@@ -167,24 +186,37 @@ def build_joint_optimizer(optimizer_name, bert_model, synergy_model, bert_lr, sy
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
 
-def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch, writer, device, 
-               false_positive_penalty=1.0, accumulation_steps=1, use_empty_cache=False):
+def train_loop(
+    bert_model,
+    synergy_model,
+    dataloader,
+    optimizer,
+    loss_fn,
+    epoch,
+    writer,
+    device,
+    false_positive_penalty=1.0,
+    accumulation_steps=1,
+    use_empty_cache=False,
+):
 
     bert_model.train()
     synergy_model.train()
     total_loss = 0.0
     all_preds, all_labels = [], []
 
-    optimizer.zero_grad()
-    
-    for step, batch in enumerate(tqdm(dataloader, desc="Train")):
-        input_ids1 = batch['input_ids1'].to(device)
-        attention_mask1 = batch['attention_mask1'].to(device)
-        input_ids2 = batch['input_ids2'].to(device)
-        attention_mask2 = batch['attention_mask2'].to(device)
-        labels = batch['label'].to(device)
+    scaler = GradScaler()
 
-        with autocast(device_type='cuda'):
+    optimizer.zero_grad()
+
+    for step, batch in enumerate(tqdm(dataloader, desc="Train")):
+        input_ids1 = batch["input_ids1"].to(device)
+        attention_mask1 = batch["attention_mask1"].to(device)
+        input_ids2 = batch["input_ids2"].to(device)
+        attention_mask2 = batch["attention_mask2"].to(device)
+        labels = batch["label"].to(device)
+
+        with autocast(device_type="cuda"):
             # Get BERT embeddings for both cards
             embed1 = bert_model(input_ids1, attention_mask1)
             embed2 = bert_model(input_ids2, attention_mask2)
@@ -226,21 +258,35 @@ def train_loop(bert_model, synergy_model, dataloader, optimizer, loss_fn, epoch,
     f1 = f1_score(all_labels, all_preds, zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
 
-    print(f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}")
-    print(f"Train | Confusion Matrix:\n{cm}")
+    print(
+        f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}"
+    )
+    print(f"Train | Confusion Matrix:\n")
     print(f"Total | TP: {cm[1,1]}, TN: {cm[0,0]}, FP: {cm[0,1]}, FN: {cm[1,0]}")
-    
+
     writer.add_scalar("Train/Loss", avg_loss, epoch)
     writer.add_scalar("Train/Precision", precision, epoch)
     writer.add_scalar("Train/Recall", recall, epoch)
     writer.add_scalar("Train/F1", f1, epoch)
-    writer.add_scalar("Train/TP", cm[1,1], epoch)
-    writer.add_scalar("Train/TN", cm[0,0], epoch)
-    writer.add_scalar("Train/FP", cm[0,1], epoch)
-    writer.add_scalar("Train/FN", cm[1,0], epoch)
+    writer.add_scalar("Train/TP", cm[1, 1], epoch)
+    writer.add_scalar("Train/TN", cm[0, 0], epoch)
+    writer.add_scalar("Train/FP", cm[0, 1], epoch)
+    writer.add_scalar("Train/FN", cm[1, 0], epoch)
 
     return avg_loss, precision, recall, f1, cm
-def eval_loop(bert_model, synergy_model, dataloader, loss_fn, epoch, writer, device, label="Val", false_positive_penalty=1.0):
+
+
+def eval_loop(
+    bert_model,
+    synergy_model,
+    dataloader,
+    loss_fn,
+    epoch,
+    writer,
+    device,
+    label="Val",
+    false_positive_penalty=1.0,
+):
     bert_model.eval()
     synergy_model.eval()
     total_loss = 0.0
@@ -248,11 +294,11 @@ def eval_loop(bert_model, synergy_model, dataloader, loss_fn, epoch, writer, dev
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc=f"{label} Eval"):
-            input_ids1 = batch['input_ids1'].to(device)
-            attention_mask1 = batch['attention_mask1'].to(device)
-            input_ids2 = batch['input_ids2'].to(device)
-            attention_mask2 = batch['attention_mask2'].to(device)
-            labels = batch['label'].to(device)
+            input_ids1 = batch["input_ids1"].to(device)
+            attention_mask1 = batch["attention_mask1"].to(device)
+            input_ids2 = batch["input_ids2"].to(device)
+            attention_mask2 = batch["attention_mask2"].to(device)
+            labels = batch["label"].to(device)
 
             # Get BERT embeddings for both cards
             embed1 = bert_model(input_ids1, attention_mask1)
@@ -275,11 +321,15 @@ def eval_loop(bert_model, synergy_model, dataloader, loss_fn, epoch, writer, dev
     f1 = f1_score(all_labels, all_preds, zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
 
-    print(f"{label} | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}")
-    print(f"{label} | Confusion Matrix (scikit-learn):\n{cm}")
-    print(f"{label} | Total TP: {np.sum(cm[1, 1])}, TN: {np.sum(cm[0, 0])}, "
-          f"FP: {np.sum(cm[0, 1])}, FN: {np.sum(cm[1, 0])}")
-    
+    print(
+        f"{label} | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}"
+    )
+    print(f"{label} | Confusion Matrix (scikit-learn):\n")
+    print(
+        f"{label} | Total TP: {np.sum(cm[1, 1])}, TN: {np.sum(cm[0, 0])}, "
+        f"FP: {np.sum(cm[0, 1])}, FN: {np.sum(cm[1, 0])}"
+    )
+
     writer.add_scalar(f"{label}/Loss", avg_loss, epoch)
     writer.add_scalar(f"{label}/Precision", precision, epoch)
     writer.add_scalar(f"{label}/Recall", recall, epoch)
@@ -291,6 +341,7 @@ def eval_loop(bert_model, synergy_model, dataloader, loss_fn, epoch, writer, dev
 
     return avg_loss, precision, recall, f1, cm
 
+
 def train_joint_model(config):
     log_full_dir = os.path.join(config["log_dir"], config["run_name"])
     save_full_dir = os.path.join(config["save_dir"], config["run_name"])
@@ -301,12 +352,10 @@ def train_joint_model(config):
     writer = SummaryWriter(log_dir=log_full_dir)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    
     print(f"Run: {config["run_name"]}")
 
-    #write var config with writer
+    # write var config with writer
     writer.add_text("Config", json.dumps(config, indent=4))
-
 
     # Step 1: Load and split indices
     real_indices, fake_indices = get_real_fake_indices(config["synergy_file"])
@@ -320,9 +369,8 @@ def train_joint_model(config):
     splits = {
         "train": {"real": 0.8, "fake": 0.1},
         "val_real": {"real": 0.1, "fake": 0.0},
-        "val_real_fake": {"real": 0.1, "fake": 0.03}
+        "val_real_fake": {"real": 0.1, "fake": 0.03},
     }
-
 
     random.shuffle(real_indices)
     random.shuffle(fake_indices)
@@ -354,53 +402,122 @@ def train_joint_model(config):
     val_real_indices = real_val + fake_val
     val_real_fake_indices = real_val_2 + fake_val_2
 
-
-    tokenizer = BertTokenizer.from_pretrained(config["bert_model_name"])
+    model_name = config["bert_model_name"]
+    tokenizer = None
+    if model_name is None or model_name == "":
+        print("Using default BertTokenizer")
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    elif model_name == "bert-base-uncased":
+        print("Using BertTokenizer")
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    elif model_name == "distilbert-base-uncased":
+        print("Using DistilBertTokenizer")
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
     # Step 2: Build full dataset and wrap in Subsets
-    full_dataset = JointCardDataset(config["synergy_file"], config["bulk_file"], tokenizer, config["max_length_bert_tokenizer"])
+    full_dataset = JointCardDataset(
+        config["synergy_file"],
+        config["bulk_file"],
+        tokenizer,
+        config["max_length_bert_tokenizer"],
+    )
 
     train_dataset = Subset(full_dataset, train_indices)
     val_dataset = Subset(full_dataset, val_real_indices)
     val_fake_dataset = Subset(full_dataset, val_real_fake_indices)
 
-    train_loader = DataLoader(train_dataset, batch_size=config["batch_size"], shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=config["batch_size"], drop_last=True)
-    val_fake_loader = DataLoader(val_fake_dataset, batch_size=config["batch_size"], drop_last=True)
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=config["batch_size"],
+        shuffle=True,
+        drop_last=True,
+        num_workers=2,  # 4 parallel loading processes
+        pin_memory=True,  # enable faster transfer to GPU
+        prefetch_factor=2,
+    )
+    val_loader = DataLoader(
+        val_dataset, batch_size=config["batch_size"], drop_last=True
+    )
+    val_fake_loader = DataLoader(
+        val_fake_dataset, batch_size=config["batch_size"], drop_last=True
+    )
 
-    print(f"Train size: {len(train_loader.dataset)}, real: {len(real_train)}, fake: {len(fake_train)}")
-    print(f"Val Real size: {len(val_loader.dataset)}, real: {len(real_val)}, fake: {len(fake_val)}")
-    print(f"Val Fake+Real size: {len(val_fake_loader.dataset)}, real: {len(real_val_2)}, fake: {len(fake_val_2)}")
-
-    # #SLOW AF, to test only
-    # print(f"Train synergy=1: {sum(1 for i in train_loader.dataset if i['label'].item() == 1)}")
-    # print(f"Train synergy=0: {sum(1 for i in train_loader.dataset if i['label'].item() == 0)}")
-
-    # print(f"Val Real synergy=1: {sum(1 for i in val_loader.dataset if i['label'].item() == 1)}")
-    # print(f"Val Real synergy=0: {sum(1 for i in val_loader.dataset if i['label'].item() == 0)}")
-
-    # print(f"Val Fake+Real synergy=1: {sum(1 for i in val_fake_loader.dataset if i['label'].item() == 1)}")
-    # print(f"Val Fake+Real synergy=0: {sum(1 for i in val_fake_loader.dataset if i['label'].item() == 0)}")
-
-
-    
+    print(
+        f"Train size: {len(train_loader.dataset)}, real: {len(real_train)}, fake: {len(fake_train)}"
+    )
+    print(
+        f"Val Real size: {len(val_loader.dataset)}, real: {len(real_val)}, fake: {len(fake_val)}"
+    )
+    print(
+        f"Val Fake+Real size: {len(val_fake_loader.dataset)}, real: {len(real_val_2)}, fake: {len(fake_val_2)}"
+    )
 
     # Models
-    bert_model = BertEmbedRegressor(config["embedding_dim"], model_name=config["bert_model_name"]).to(device)
-    if config["bert_checkpoint"] and config["bert_checkpoint"] != "" :
+    bert_model = BertEmbedRegressor(
+        config["embedding_dim"], model_name=config["bert_model_name"]
+    ).to(device)
+    if config["bert_checkpoint"] and config["bert_checkpoint"] != "":
         bert_model.load_state_dict(torch.load(config["bert_checkpoint"]))
         print(f"Loaded BERT checkpoint: {config['bert_checkpoint']}")
 
-    synergy_model = build_model(config["synergy_arch"], config["embedding_dim"]).to(device)
+    synergy_model = build_model(config["synergy_arch"], config["embedding_dim"]).to(
+        device
+    )
 
-    optimizer, loss_fn = build_training_components(config, bert_model, synergy_model, device)
+    optimizer, loss_fn = build_training_components(
+        config, bert_model, synergy_model, device
+    )
 
     for epoch in tqdm(range(config["epochs"]), desc="Epochs"):
-        train_loop(bert_model,synergy_model, train_loader, optimizer, loss_fn, epoch, writer, device, accumulation_steps=config["accumulation_steps"],use_empty_cache=config.get("use_empty_cache", False))
-        eval_loop(bert_model,synergy_model, val_loader, loss_fn, epoch, writer, device, label="Val Real")
-        eval_loop(bert_model,synergy_model, val_fake_loader, loss_fn, epoch, writer, device, label="Val Fake+Real")
+        train_loop(
+            bert_model,
+            synergy_model,
+            train_loader,
+            optimizer,
+            loss_fn,
+            epoch,
+            writer,
+            device,
+            accumulation_steps=config["accumulation_steps"],
+            use_empty_cache=config.get("use_empty_cache", False),
+        )
+        eval_loop(
+            bert_model,
+            synergy_model,
+            val_loader,
+            loss_fn,
+            epoch,
+            writer,
+            device,
+            label="Val Real",
+        )
+        eval_loop(
+            bert_model,
+            synergy_model,
+            val_fake_loader,
+            loss_fn,
+            epoch,
+            writer,
+            device,
+            label="Val Fake+Real",
+        )
 
-    
+        if (epoch + 1) % config["save_every"] == 0:
+            bert_model_path = os.path.join(
+                save_full_dir, f"bert_model_epoch_{epoch + 1}.pth"
+            )
+            synergy_model_path = os.path.join(
+                save_full_dir, f"synergy_model_epoch_{epoch + 1}.pth"
+            )
+            torch.save(bert_model.state_dict(), bert_model_path)
+            torch.save(synergy_model.state_dict(), synergy_model_path)
+            print(f"Saved models at epoch {epoch + 1}")
 
+    # Final save
+    bert_model_path = os.path.join(save_full_dir, "bert_model_final.pth")
+    synergy_model_path = os.path.join(save_full_dir, "synergy_model_final.pth")
+    torch.save(bert_model.state_dict(), bert_model_path)
+    torch.save(synergy_model.state_dict(), synergy_model_path)
+    print(f"Final models saved at {save_full_dir}")
     writer.close()
 
 
