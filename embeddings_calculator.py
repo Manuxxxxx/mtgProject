@@ -7,13 +7,13 @@ from tqdm import tqdm
 from transformers import BertTokenizer, BertModel
 import bert_parsing
 import conf
-from bert_emb_tags import BertEmbedRegressor
+from bert_emb_tags import BertEmbedRegressor, initialize_bert_model
 
 
-MODEL_NAME = "bert-base-uncased"
+MODEL_NAME = "distilbert-base-uncased"
 EMBEDDING_DIM = 384  # Should match the dimension of tag embeddings
-MAX_LEN = 320
-CHECKPOINT_FILE="checkpoints/bert_embed_regression20250515-175957/model_epoch_12.pth"
+MAX_LEN = 256
+CHECKPOINT_FILE="checkpoints/joint_training/complex_noTrainBertMini_AdamW_20250613_134003/bert_model_epoch_5.pth"
 
 
 
@@ -55,9 +55,7 @@ def load_bulk_file(bulk_file):
     return data
 
 def create_embedding_file(bulk_file, save_every=500):
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    tokenizer = BertTokenizer.from_pretrained(MODEL_NAME)
-    model = BertEmbedRegressor(output_dim=EMBEDDING_DIM).to(device)
+    model, tokenizer, device = initialize_bert_model(MODEL_NAME, EMBEDDING_DIM)
     model.load_state_dict(torch.load(CHECKPOINT_FILE))
     model.eval()
 
@@ -90,4 +88,4 @@ def create_embedding_file(bulk_file, save_every=500):
         f.write(compacted)
 
 if __name__ == "__main__":
-    create_embedding_file("/home/emanuele/Documenti/Università/ANLP/mtgProject/datasets/processed/embedding_predicted/all_commander_legal_cards20250609112722.json", save_every=300)
+    create_embedding_file("datasets/processed/embedding_predicted/joint/commander_legal_cards20250609112722.json", save_every=300)

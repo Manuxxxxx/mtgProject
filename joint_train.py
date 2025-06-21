@@ -16,6 +16,7 @@ from torch.utils.data import Subset
 import time
 import sys
 from torch.amp import autocast, GradScaler
+import shutil
 
 from synergy_model import (
     build_model,
@@ -23,7 +24,7 @@ from synergy_model import (
     eval_loop,
     build_optimizer,
 )
-from bert_emb_tags import BertEmbedRegressor
+from bert_emb_tags import BertEmbedRegressor, initialize_bert_model
 
 import bert_parsing
 
@@ -342,28 +343,134 @@ def eval_loop(
     return avg_loss, precision, recall, f1, cm
 
 
-def train_joint_model(config):
-    log_full_dir = os.path.join(config["log_dir"], config["run_name"])
-    save_full_dir = os.path.join(config["save_dir"], config["run_name"])
-
-    os.makedirs(log_full_dir, exist_ok=True)
-    os.makedirs(save_full_dir, exist_ok=True)
-
-    writer = SummaryWriter(log_dir=log_full_dir)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    print(f"Run: {config["run_name"]}")
-
-    # write var config with writer
-    writer.add_text("Config", json.dumps(config, indent=4))
-
-    # Step 1: Load and split indices
-    real_indices, fake_indices = get_real_fake_indices(config["synergy_file"])
+def split_indices(real_indices, fake_indices, splits, log_splits=False):
     random.shuffle(real_indices)
     random.shuffle(fake_indices)
 
-    # Split into sets
-    # 80% train, 10% validation for real, 10% validation for fake
+    num_real = len(real_indices)
+    num_fake = len(fake_indices)
+
+    real_ptr = 0
+    fake_ptr = 0
+
+    real_allocations = {}
+    fake_allocations = {}
+
+    # Allocate real indices
+    for split_name, ratios in splits.items():
+        count = int(ratios.get("real", 0) * num_real)
+        real_allocations[split_name] = real_indices[real_ptr : real_ptr + count]
+        real_ptr += count
+
+    # Allocate fake indices
+    for split_name, ratios in splits.items():
+        count = int(ratios.get("fake", 0) * num_fake)
+        fake_allocations[split_name] = fake_indices[fake_ptr : fake_ptr + count]
+        fake_ptr += count
+
+    # Combine real and fake indices per split
+    final_splits = {}
+    for split_name in splits:
+        final_splits[split_name] = real_allocations.get(
+            split_name, []
+        ) + fake_allocations.get(split_name, [])
+        if log_splits:
+            print(
+                f"{split_name} - Real: {len(real_allocations[split_name])}, Fake: {len(fake_allocations[split_name])}, Total: {len(final_splits[split_name])}"
+            )
+
+    return final_splits
+
+def create_dataloaders(config, tokenizer, index_splits):
+    # Create full dataset
+    full_dataset = JointCardDataset(
+        config["synergy_file"],
+        config["bulk_file"],
+        tokenizer,
+        config["max_length_bert_tokenizer"],
+    )
+
+    # Create Subset datasets
+    datasets = {
+        split_name: Subset(full_dataset, indices)
+        for split_name, indices in index_splits.items()
+    }
+
+    # Create DataLoaders
+    dataloaders = {}
+    for split_name, dataset in datasets.items():
+        is_train = split_name == "train"
+        dataloaders[split_name] = DataLoader(
+            dataset,
+            batch_size=config["batch_size"],
+            shuffle=is_train,
+            drop_last=True,
+            num_workers=2,
+            pin_memory=True,
+            prefetch_factor=2 if is_train else None,
+        )
+
+    return dataloaders
+
+def clone_content_of_dir(src_dir, dest_dir):
+    for item in os.listdir(src_dir):
+        s = os.path.join(src_dir, item)
+        d = os.path.join(dest_dir, item)
+        if os.path.isdir(s):
+            shutil.copytree(s, d, dirs_exist_ok=True)
+        else:
+            shutil.copy2(s, d)
+
+def setup_dirs_writer(config):
+    start_epoch = config.get("start_epoch", 0)
+    if start_epoch > 0:
+        print(f"Resuming from epoch {start_epoch}")
+        # Load the last save model writer and logs
+        previous_run_name = config["run_name_previous"]
+        # clone the log directory
+        prev_log_full_dir = os.path.join(config["log_dir"], previous_run_name)
+        prev_save_full_dir = os.path.join(config["save_dir"], previous_run_name)
+        if not os.path.exists(prev_save_full_dir) or not os.path.exists(prev_log_full_dir):
+            raise FileNotFoundError(
+                f"Previous run directories do not exist: {prev_save_full_dir} or {prev_log_full_dir}"
+            )
+        new_run_name = config["run_name"]
+        log_full_dir = os.path.join(config["log_dir"], new_run_name)
+        save_full_dir = os.path.join(config["save_dir"], new_run_name)
+        os.makedirs(log_full_dir, exist_ok=True)
+        os.makedirs(save_full_dir, exist_ok=True)
+        clone_content_of_dir(prev_log_full_dir, log_full_dir)
+        clone_content_of_dir(prev_save_full_dir, save_full_dir)
+        writer = SummaryWriter(log_dir=log_full_dir)
+        
+        print(f"Loaded previous run logs from {prev_log_full_dir}")
+    else:
+        print("Starting from scratch, no previous epoch to resume.")
+
+        log_full_dir = os.path.join(config["log_dir"], config["run_name"])
+        save_full_dir = os.path.join(config["save_dir"], config["run_name"])
+
+        os.makedirs(log_full_dir, exist_ok=True)
+        os.makedirs(save_full_dir, exist_ok=True)
+
+        writer = SummaryWriter(log_dir=log_full_dir)
+
+        
+
+        # write var config with writer
+        writer.add_text("Config", json.dumps(config, indent=4))
+    
+    return writer, save_full_dir, start_epoch
+
+def train_joint_model(config):
+    
+    # Set up directories and writer
+    writer, save_full_dir, start_epoch = setup_dirs_writer(config)
+
+    print(f"Run: {config["run_name"]}")
+
+    # Step 1: Load and split indices
+    real_indices, fake_indices = get_real_fake_indices(config["synergy_file"])
 
     # Define split proportions
     splits = {
@@ -372,89 +479,21 @@ def train_joint_model(config):
         "val_real_fake": {"real": 0.1, "fake": 0.03},
     }
 
-    random.shuffle(real_indices)
-    random.shuffle(fake_indices)
+    split_indices_result = split_indices(
+        real_indices, fake_indices, splits, log_splits=True
+    )
 
-    # Compute counts
-    num_real = len(real_indices)
-    num_fake = len(fake_indices)
-
-    real_train_end = int(splits["train"]["real"] * num_real)
-    real_val_end = real_train_end + int(splits["val_real"]["real"] * num_real)
-    real_val2_end = real_val_end + int(splits["val_real_fake"]["real"] * num_real)
-
-    fake_train_end = int(splits["train"]["fake"] * num_fake)
-    fake_val_end = fake_train_end + int(splits["val_real"]["fake"] * num_fake)
-    fake_val2_end = fake_val_end + int(splits["val_real_fake"]["fake"] * num_fake)
-
-    # Real subsets
-    real_train = real_indices[:real_train_end]
-    real_val = real_indices[real_train_end:real_val_end]
-    real_val_2 = real_indices[real_val_end:real_val2_end]
-
-    # Fake subsets
-    fake_train = fake_indices[:fake_train_end]
-    fake_val = fake_indices[fake_train_end:fake_val_end]
-    fake_val_2 = fake_indices[fake_val_end:fake_val2_end]
-
-    # Final indices
-    train_indices = real_train + fake_train
-    val_real_indices = real_val + fake_val
-    val_real_fake_indices = real_val_2 + fake_val_2
-
+    # Step 2: Initialize BERT model and tokenizer
     model_name = config["bert_model_name"]
-    tokenizer = None
-    if model_name is None or model_name == "":
-        print("Using default BertTokenizer")
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    elif model_name == "bert-base-uncased":
-        print("Using BertTokenizer")
-        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
-    elif model_name == "distilbert-base-uncased":
-        print("Using DistilBertTokenizer")
-        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
-    # Step 2: Build full dataset and wrap in Subsets
-    full_dataset = JointCardDataset(
-        config["synergy_file"],
-        config["bulk_file"],
-        tokenizer,
-        config["max_length_bert_tokenizer"],
-    )
+    embedding_dim = config.get("embedding_dim", 384)
+    bert_model, tokenizer, device = initialize_bert_model(model_name, embedding_dim)
 
-    train_dataset = Subset(full_dataset, train_indices)
-    val_dataset = Subset(full_dataset, val_real_indices)
-    val_fake_dataset = Subset(full_dataset, val_real_fake_indices)
+    data_loaders = create_dataloaders(config, tokenizer, split_indices_result)
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config["batch_size"],
-        shuffle=True,
-        drop_last=True,
-        num_workers=2,  # 4 parallel loading processes
-        pin_memory=True,  # enable faster transfer to GPU
-        prefetch_factor=2,
-    )
-    val_loader = DataLoader(
-        val_dataset, batch_size=config["batch_size"], drop_last=True
-    )
-    val_fake_loader = DataLoader(
-        val_fake_dataset, batch_size=config["batch_size"], drop_last=True
-    )
+    train_loader = data_loaders["train"]
 
-    print(
-        f"Train size: {len(train_loader.dataset)}, real: {len(real_train)}, fake: {len(fake_train)}"
-    )
-    print(
-        f"Val Real size: {len(val_loader.dataset)}, real: {len(real_val)}, fake: {len(fake_val)}"
-    )
-    print(
-        f"Val Fake+Real size: {len(val_fake_loader.dataset)}, real: {len(real_val_2)}, fake: {len(fake_val_2)}"
-    )
+    # Models loading
 
-    # Models
-    bert_model = BertEmbedRegressor(
-        config["embedding_dim"], model_name=config["bert_model_name"]
-    ).to(device)
     if config["bert_checkpoint"] and config["bert_checkpoint"] != "":
         bert_model.load_state_dict(torch.load(config["bert_checkpoint"]))
         print(f"Loaded BERT checkpoint: {config['bert_checkpoint']}")
@@ -467,7 +506,14 @@ def train_joint_model(config):
         config, bert_model, synergy_model, device
     )
 
-    for epoch in tqdm(range(config["epochs"]), desc="Epochs"):
+    
+
+    for epoch in tqdm(
+        range(start_epoch, config["epochs"]),
+        desc="Epochs",
+        initial=start_epoch
+    ):
+
         train_loop(
             bert_model,
             synergy_model,
@@ -480,26 +526,39 @@ def train_joint_model(config):
             accumulation_steps=config["accumulation_steps"],
             use_empty_cache=config.get("use_empty_cache", False),
         )
-        eval_loop(
-            bert_model,
-            synergy_model,
-            val_loader,
-            loss_fn,
-            epoch,
-            writer,
-            device,
-            label="Val Real",
-        )
-        eval_loop(
-            bert_model,
-            synergy_model,
-            val_fake_loader,
-            loss_fn,
-            epoch,
-            writer,
-            device,
-            label="Val Fake+Real",
-        )
+        if (epoch + 1) % config["eval_every"] == 0:
+            # eval_loop(
+            #     bert_model,
+            #     synergy_model,
+            #     val_loader,
+            #     loss_fn,
+            #     epoch,
+            #     writer,
+            #     device,
+            #     label="Val Real",
+            # )
+            # eval_loop(
+            #     bert_model,
+            #     synergy_model,
+            #     val_fake_loader,
+            #     loss_fn,
+            #     epoch,
+            #     writer,
+            #     device,
+            #     label="Val Fake+Real",
+            # )
+            for split_name, loader in data_loaders.items():
+                if split_name.startswith("val"):
+                    eval_loop(
+                        bert_model,
+                        synergy_model,
+                        loader,
+                        loss_fn,
+                        epoch,
+                        writer,
+                        device,
+                        label=split_name.replace("_", " ").title()
+                    )
 
         if (epoch + 1) % config["save_every"] == 0:
             bert_model_path = os.path.join(

@@ -243,6 +243,23 @@ def train_the_model():
 
     writer.close()
 
+def initialize_bert_model(model_name=None, embedding_dim=EMBEDDING_DIM):
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    tokenizer = None
+    if model_name is None or model_name == "":
+        print("Using default BertTokenizer")
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    elif model_name == "bert-base-uncased":
+        print("Using BertTokenizer")
+        tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+    elif model_name == "distilbert-base-uncased":
+        print("Using DistilBertTokenizer")
+        tokenizer = DistilBertTokenizer.from_pretrained('distilbert-base-uncased')
+
+    model = BertEmbedRegressor(output_dim=embedding_dim, model_name=model_name).to(device)
+    return model, tokenizer, device
+
 
 if __name__ == "__main__":
     train_the_model()
