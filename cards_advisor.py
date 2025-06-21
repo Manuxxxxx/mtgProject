@@ -7,21 +7,24 @@ import random
 
 # Configuration
 EMBEDDING_DIM = 384
-CHECKPOINT_FILE = "checkpoints/complex_sgd_run__20250611_234500/model_epoch_250.pth"
-BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/all_commander_legal_cards20250609112722.json"
+CHECKPOINT_FILE = "checkpoints/joint_training/complex_noTrainBertMini_AdamW_20250613_134003/synergy_model_epoch_5.pth"
+BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint/commander_legal_cards20250609112722.json"
 TOP_N = 30  # how many cards to recommend
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def load_embeddings(path):
+def load_embeddings_cards(path):
     with open(path, "r", encoding="utf-8") as f:
         cards = json.load(f)
-    lookup = {}
+    lookup_emb = {}
+    lookup_cards = {}
     for card in cards:
         emb = card.get("emb", [])
         if isinstance(emb, list) and len(emb) == 1 and len(emb[0]) == EMBEDDING_DIM:
-            lookup[card["name"]] = torch.tensor(emb[0], dtype=torch.float)
-    return lookup
+            lookup_emb[card["name"]] = torch.tensor(emb[0], dtype=torch.float)
+        
+        lookup_cards[card["name"]] = card
+    return lookup_emb, lookup_cards
 
 
 def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
@@ -84,7 +87,7 @@ if __name__ == "__main__":
     print("deck length:", len(current_deck))
 
     print(" Loading data...")
-    all_embeddings = load_embeddings(BULK_EMBEDDING_FILE)
+    all_embeddings, all_cards = load_embeddings_cards(BULK_EMBEDDING_FILE)
 
     print(" Loading model...")
     model = ModelComplex(EMBEDDING_DIM).to(DEVICE)
