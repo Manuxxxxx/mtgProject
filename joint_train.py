@@ -17,6 +17,7 @@ import time
 import sys
 from torch.amp import autocast, GradScaler
 import shutil
+from tag_model import TagModel
 
 from synergy_model import (
     build_model,
@@ -45,16 +46,53 @@ def set_seed(seed: int = 42):
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
-    def __init__(self, synergy_data, card_data, tokenizer, max_length=320):
+    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None):
         synergy_data = json.load(open(synergy_data, "r"))
         card_data = json.load(open(card_data, "r"))
+
         self.synergy_data = synergy_data
+        if subset_indices is not None:
+            self.synergy_data = [self.synergy_data[i] for i in subset_indices]
+
         self.tokenizer = tokenizer
         self.card_lookup = build_card_lookup(card_data)
         self.max_length = max_length
+        self.tags_len = tags_len
+        
+        if tags_len is not None:
+            all_tags = set()
+            for c in self.card_lookup.values():
+                if "tags" in c and c["tags"]:
+                    all_tags.update(c["tags"])
+
+            self.tag_to_index = {tag: i for i, tag in enumerate(all_tags)}
+            if len(self.tag_to_index) != tags_len:
+                raise ValueError(
+                    f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
+                )
+
 
     def __len__(self):
         return len(self.synergy_data)
+    
+    def print_synergy(self):
+        counts = [0,0,0,0]
+        for synergy in self.synergy_data:
+            if "synergy_edhrec" in synergy:
+                counts[0] += 1
+                if synergy["synergy"] == 0:
+                    counts[1] += 1
+            elif synergy.get("synergy", 0) == 1:
+                counts[2] += 1
+            else:
+                counts[3] += 1
+
+        print(f"Dataset counts: "
+                f"Real Synergy = 1: {counts[0]},"
+                f"Real Synergy = 0: {counts[1]},"
+                f"Fake Synergy = 1: {counts[2]},"  
+                f"Fake Synergy = 0: {counts[3]}"
+ )
 
     def __getitem__(self, idx):
         entry = self.synergy_data[idx]
@@ -86,13 +124,42 @@ class JointCardDataset(Dataset):
             return_tensors="pt",
         )
         label = torch.tensor([entry.get("synergy", 0)], dtype=torch.float)
+
+        tag_hot1 = self.hot_encode_tags(card1)
+        tag_hot2 = self.hot_encode_tags(card2)
+
         return {
             "input_ids1": inputs1["input_ids"].squeeze(0),
             "attention_mask1": inputs1["attention_mask"].squeeze(0),
             "input_ids2": inputs2["input_ids"].squeeze(0),
             "attention_mask2": inputs2["attention_mask"].squeeze(0),
             "label": label,
+            "tag_hot1": tag_hot1,
+            "tag_hot2": tag_hot2,
         }
+    
+    def hot_encode_tags(self, card):
+        """
+        Convert card tags to a one-hot encoded vector.
+        """
+        if self.tags_len is None:
+            return torch.zeros(0, dtype=torch.float32)
+        if "tags" not in card or not card["tags"]:
+            return torch.zeros(self.tags_len, dtype=torch.float)
+        
+        
+        tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
+        
+        
+        for tag in card["tags"]:
+            if tag in self.tag_to_index:
+                tag_vector[self.tag_to_index[tag]] = 1.0
+            else:
+                raise ValueError(
+                    f"Tag '{tag}' not found in tag_to_index mapping. Available tags: {', '.join(self.tag_to_index.keys())}"
+                )
+        
+        return torch.tensor(tag_vector, dtype=torch.float32)
 
     def find_card_by_name(self, name):
         # Try exact match first
@@ -152,7 +219,7 @@ def get_real_fake_indices(synergy_file):
     return real_indices, fake_indices
 
 
-def build_training_components(config, bert_model, synergy_model, device):
+def build_training_components(config, bert_model, synergy_model, device, tag_model=None):
     optimizer = build_joint_optimizer(
         config["optimizer"],
         bert_model,
@@ -160,22 +227,28 @@ def build_training_components(config, bert_model, synergy_model, device):
         config["bert_learning_rate"],
         config["synergy_learning_rate"],
         config.get("optimizer_config", {}),
+        tag_model=tag_model,
+        tag_lr=config.get("tag_learning_rate", None),
+
     )
 
     loss_fn = nn.BCEWithLogitsLoss(
         pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device)
     )
+    loss_tag_fn = nn.BCEWithLogitsLoss().to(device) if tag_model is not None else None
 
-    return optimizer, loss_fn
+    return optimizer, loss_fn, loss_tag_fn
 
 
 def build_joint_optimizer(
-    optimizer_name, bert_model, synergy_model, bert_lr, synergy_lr, optimizer_config
+    optimizer_name, bert_model, synergy_model, bert_lr, synergy_lr, optimizer_config, tag_model=None, tag_lr=None
 ):
     param_groups = [
         {"params": bert_model.parameters(), "lr": bert_lr},
         {"params": synergy_model.parameters(), "lr": synergy_lr},
     ]
+    if tag_model is not None and tag_lr is not None:
+        param_groups.append({"params": tag_model.parameters(), "lr": tag_lr})
 
     if optimizer_name == "Adam":
         return optim.Adam(param_groups, **optimizer_config)
@@ -190,20 +263,26 @@ def build_joint_optimizer(
 def train_loop(
     bert_model,
     synergy_model,
+    tag_model,
     dataloader,
     optimizer,
     loss_fn,
+    loss_tag_model,
     epoch,
     writer,
     device,
     false_positive_penalty=1.0,
+    tag_loss_weight=0.5,
     accumulation_steps=1,
     use_empty_cache=False,
 ):
 
     bert_model.train()
     synergy_model.train()
-    total_loss = 0.0
+    if tag_model is not None:
+        tag_model.train()
+    total_synergy_loss = 0.0
+    total_tag_loss = 0.0
     all_preds, all_labels = [], []
 
     scaler = GradScaler()
@@ -217,10 +296,27 @@ def train_loop(
         attention_mask2 = batch["attention_mask2"].to(device)
         labels = batch["label"].to(device)
 
+        tag_hot1 = None
+        tag_hot2 = None
+        if tag_model is not None:
+            tag_hot1 = batch["tag_hot1"].to(device)
+            tag_hot2 = batch["tag_hot2"].to(device)
+
         with autocast(device_type="cuda"):
             # Get BERT embeddings for both cards
             embed1 = bert_model(input_ids1, attention_mask1)
             embed2 = bert_model(input_ids2, attention_mask2)
+
+            tag_loss = 0.0
+            if tag_model is not None:
+                tags_pred1 = tag_model(embed1)
+                tags_pred2 = tag_model(embed2)
+
+            # If tag_model is not None, calculate tag loss
+            
+                tag_loss1 = loss_tag_model(tags_pred1, tag_hot1)
+                tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
+                tag_loss = (tag_loss1 + tag_loss2) / 2.0
 
             # Forward pass through synergy model
             logits = synergy_model(embed1, embed2)
@@ -229,8 +325,10 @@ def train_loop(
                 logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
             )
 
+            # Combine losses
+            full_loss = weighted_loss + tag_loss_weight * tag_loss
             # Normalize loss for gradient accumulation
-            loss_scaled = weighted_loss / accumulation_steps
+            loss_scaled = full_loss / accumulation_steps
 
         # AMP backward pass
         scaler.scale(loss_scaled).backward()
@@ -243,7 +341,8 @@ def train_loop(
             if use_empty_cache:
                 torch.cuda.empty_cache()
 
-        total_loss += weighted_loss.item()  # already scaled back for logging
+        total_synergy_loss += weighted_loss.item()  # already scaled back for logging
+        total_tag_loss += tag_loss.item() * tag_loss_weight
         all_preds.extend(preds.cpu().numpy())
         all_labels.extend(labels.cpu().numpy().astype(int))
 
@@ -253,19 +352,24 @@ def train_loop(
         scaler.update()
         optimizer.zero_grad()
 
-    avg_loss = total_loss / len(dataloader)
+    avg_loss = (total_tag_loss+total_synergy_loss) / len(dataloader)
+    avg_synergy_loss = total_synergy_loss / len(dataloader)
+    avg_tag_loss = total_tag_loss / len(dataloader)
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
     f1 = f1_score(all_labels, all_preds, zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
 
     print(
-        f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}"
+        f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f} | "
+        f"Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f}"
     )
     print(f"Train | Confusion Matrix:\n")
     print(f"Total | TP: {cm[1,1]}, TN: {cm[0,0]}, FP: {cm[0,1]}, FN: {cm[1,0]}")
 
     writer.add_scalar("Train/Loss", avg_loss, epoch)
+    writer.add_scalar("Train/Synergy Loss", avg_synergy_loss, epoch)
+    writer.add_scalar("Train/Tag Loss", avg_tag_loss, epoch)
     writer.add_scalar("Train/Precision", precision, epoch)
     writer.add_scalar("Train/Recall", recall, epoch)
     writer.add_scalar("Train/F1", f1, epoch)
@@ -287,10 +391,17 @@ def eval_loop(
     device,
     label="Val",
     false_positive_penalty=1.0,
+    tag_model=None,
+    loss_tag_model=None,
+    tag_loss_weight=0.5,
 ):
     bert_model.eval()
     synergy_model.eval()
-    total_loss = 0.0
+    if tag_model is not None:
+        tag_model.eval()
+
+    total_synergy_loss = 0.0
+    total_tag_loss = 0.0
     all_preds, all_labels = [], []
 
     with torch.no_grad():
@@ -301,44 +412,62 @@ def eval_loop(
             attention_mask2 = batch["attention_mask2"].to(device)
             labels = batch["label"].to(device)
 
-            # Get BERT embeddings for both cards
+            tag_hot1 = batch.get("tag_hot1")
+            tag_hot2 = batch.get("tag_hot2")
+            if tag_hot1 is not None and tag_hot2 is not None:
+                tag_hot1 = tag_hot1.to(device)
+                tag_hot2 = tag_hot2.to(device)
+
+            # Get embeddings
             embed1 = bert_model(input_ids1, attention_mask1)
             embed2 = bert_model(input_ids2, attention_mask2)
 
-            # Forward pass through synergy model
-            logits = synergy_model(embed1, embed2)
+            tag_loss = 0.0
+            if tag_model is not None and tag_hot1 is not None:
+                tags_pred1 = tag_model(embed1)
+                tags_pred2 = tag_model(embed2)
 
+                tag_loss1 = loss_tag_model(tags_pred1, tag_hot1)
+                tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
+                tag_loss = (tag_loss1 + tag_loss2) / 2.0
+
+            # Synergy model
+            logits = synergy_model(embed1, embed2)
             weighted_loss, preds, _ = calculate_weighted_loss(
                 logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
             )
 
-            total_loss += weighted_loss.item()
+            total_synergy_loss += weighted_loss.item()
+            total_tag_loss += tag_loss.item() * tag_loss_weight
             all_preds.extend(preds.cpu().numpy())
             all_labels.extend(labels.cpu().numpy().astype(int))
 
-    avg_loss = total_loss / len(dataloader)
+    avg_loss = (total_synergy_loss + total_tag_loss) / len(dataloader)
+    avg_synergy_loss = total_synergy_loss / len(dataloader)
+    avg_tag_loss = total_tag_loss / len(dataloader)
+
     precision = precision_score(all_labels, all_preds, zero_division=0)
     recall = recall_score(all_labels, all_preds, zero_division=0)
     f1 = f1_score(all_labels, all_preds, zero_division=0)
     cm = confusion_matrix(all_labels, all_preds)
 
     print(
-        f"{label} | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f}"
+        f"{label} | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} "
+        f"| F1: {f1:.4f} | Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f}"
     )
-    print(f"{label} | Confusion Matrix (scikit-learn):\n")
-    print(
-        f"{label} | Total TP: {np.sum(cm[1, 1])}, TN: {np.sum(cm[0, 0])}, "
-        f"FP: {np.sum(cm[0, 1])}, FN: {np.sum(cm[1, 0])}"
-    )
+    print(f"{label} | Confusion Matrix:\n")
+    print(f"{label} | TP: {cm[1, 1]}, TN: {cm[0, 0]}, FP: {cm[0, 1]}, FN: {cm[1, 0]}")
 
     writer.add_scalar(f"{label}/Loss", avg_loss, epoch)
+    writer.add_scalar(f"{label}/Synergy Loss", avg_synergy_loss, epoch)
+    writer.add_scalar(f"{label}/Tag Loss", avg_tag_loss, epoch)
     writer.add_scalar(f"{label}/Precision", precision, epoch)
     writer.add_scalar(f"{label}/Recall", recall, epoch)
     writer.add_scalar(f"{label}/F1", f1, epoch)
-    writer.add_scalar(f"{label}/conf_matrix/TP", np.sum(cm[1, 1]), epoch)
-    writer.add_scalar(f"{label}/conf_matrix/TN", np.sum(cm[0, 0]), epoch)
-    writer.add_scalar(f"{label}/conf_matrix/FP", np.sum(cm[0, 1]), epoch)
-    writer.add_scalar(f"{label}/conf_matrix/FN", np.sum(cm[1, 0]), epoch)
+    writer.add_scalar(f"{label}/TP", cm[1, 1], epoch)
+    writer.add_scalar(f"{label}/TN", cm[0, 0], epoch)
+    writer.add_scalar(f"{label}/FP", cm[0, 1], epoch)
+    writer.add_scalar(f"{label}/FN", cm[1, 0], epoch)
 
     return avg_loss, precision, recall, f1, cm
 
@@ -382,23 +511,21 @@ def split_indices(real_indices, fake_indices, splits, log_splits=False):
     return final_splits
 
 def create_dataloaders(config, tokenizer, index_splits):
-    # Create full dataset
-    full_dataset = JointCardDataset(
-        config["synergy_file"],
-        config["bulk_file"],
-        tokenizer,
-        config["max_length_bert_tokenizer"],
-    )
-
-    # Create Subset datasets
-    datasets = {
-        split_name: Subset(full_dataset, indices)
-        for split_name, indices in index_splits.items()
-    }
 
     # Create DataLoaders
     dataloaders = {}
-    for split_name, dataset in datasets.items():
+    for split_name, indices in index_splits.items():
+        dataset = JointCardDataset(
+            config["synergy_file"],
+            config["bulk_file"],
+            tokenizer,
+            max_length=config["max_length_bert_tokenizer"],
+            tags_len=config.get("tag_output_dim", None),
+            subset_indices=indices,
+        )
+        print(f"----- Creating DataLoader for {split_name} ----")
+        dataset.print_synergy()
+
         is_train = split_name == "train"
         dataloaders[split_name] = DataLoader(
             dataset,
@@ -423,6 +550,8 @@ def clone_content_of_dir(src_dir, dest_dir):
 
 def setup_dirs_writer(config):
     start_epoch = config.get("start_epoch", 0)
+    if start_epoch is None:
+        start_epoch = 0
     if start_epoch > 0:
         print(f"Resuming from epoch {start_epoch}")
         # Load the last save model writer and logs
@@ -502,8 +631,21 @@ def train_joint_model(config):
         device
     )
 
-    optimizer, loss_fn = build_training_components(
-        config, bert_model, synergy_model, device
+    print(f"Using synergy model architecture: {config['synergy_arch']}")
+
+    tag_model = None
+    if config.get("use_tag_model", None):
+
+        tag_model = TagModel(
+            input_dim=config["embedding_dim"],
+            hidden_dim=config.get("tag_hidden_dim", 512),
+            output_dim=config.get("tag_output_dim", 271),
+            dropout=config.get("tag_dropout", 0.2)
+        ).to(device)
+        print(f"Using tag model with output dimension: {config.get('tag_output_dim', 271)}")
+
+    optimizer, loss_fn, loss_tag_fn = build_training_components(
+        config, bert_model, synergy_model, device, tag_model=tag_model
     )
 
     
@@ -517,36 +659,19 @@ def train_joint_model(config):
         train_loop(
             bert_model,
             synergy_model,
+            tag_model,
             train_loader,
             optimizer,
             loss_fn,
+            loss_tag_fn,
             epoch,
             writer,
             device,
+            tag_loss_weight=config.get("tag_loss_weight", 0.5),
             accumulation_steps=config["accumulation_steps"],
             use_empty_cache=config.get("use_empty_cache", False),
         )
         if (epoch + 1) % config["eval_every"] == 0:
-            # eval_loop(
-            #     bert_model,
-            #     synergy_model,
-            #     val_loader,
-            #     loss_fn,
-            #     epoch,
-            #     writer,
-            #     device,
-            #     label="Val Real",
-            # )
-            # eval_loop(
-            #     bert_model,
-            #     synergy_model,
-            #     val_fake_loader,
-            #     loss_fn,
-            #     epoch,
-            #     writer,
-            #     device,
-            #     label="Val Fake+Real",
-            # )
             for split_name, loader in data_loaders.items():
                 if split_name.startswith("val"):
                     eval_loop(
@@ -557,7 +682,11 @@ def train_joint_model(config):
                         epoch,
                         writer,
                         device,
-                        label=split_name.replace("_", " ").title()
+                        label=split_name,
+                        false_positive_penalty=config.get("false_positive_penalty", 1.0),
+                        tag_model=tag_model,
+                        loss_tag_model=loss_tag_fn,
+                        tag_loss_weight=config.get("tag_loss_weight", 0.5),
                     )
 
         if (epoch + 1) % config["save_every"] == 0:

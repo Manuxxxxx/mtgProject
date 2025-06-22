@@ -45,6 +45,7 @@ def filter_commander_legal_cards(
                 "colors": card.get("colors", []),
                 "keywords": card.get("keywords", []),
                 "collector_number": card.get("collector_number", ""),
+                "color_identity": card.get("color_identity", []),
             }
 
             # channge keyword field from list of string to list of object of the type {keyword: description}

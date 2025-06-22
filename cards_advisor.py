@@ -53,6 +53,55 @@ def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[:top_n]
 
+def recommend_cards_commander(current_deck, all_embeddings, all_cards, model, top_n=TOP_N, commander_name=None):
+    model.eval()
+    candidates = []
+
+    # Validate current deck embeddings
+    deck_embeddings = [all_embeddings[name] for name in current_deck if name in all_embeddings]
+    if not deck_embeddings:
+        raise ValueError("No valid embeddings found for current deck.")
+
+    # Commander colors (if given)
+    allowed_colors = None
+    if commander_name:
+        commander_info = all_cards.get(commander_name)
+        if commander_info and "colors" in commander_info:
+            allowed_colors = set(commander_info["colors"])
+        else:
+            raise ValueError(f"Commander {commander_name} not found or has no color info.")
+
+    with torch.no_grad():
+        for card_name, emb in tqdm(all_embeddings.items(), desc="Evaluating cards", unit="card"):
+            if card_name in current_deck:
+                continue  # Skip existing cards
+
+            card_info = all_cards.get(card_name, {})
+            if allowed_colors:
+                card_colors = set(card_info.get("colors", []))
+                if not card_colors.issubset(allowed_colors):
+                    continue  # Skip cards outside commander's color identity
+
+            # Synergy score between candidate and each card in the deck
+            scores = []
+            for deck_emb in deck_embeddings:
+                input_emb = torch.cat([deck_emb.unsqueeze(0), emb.unsqueeze(0)], dim=1).to(DEVICE)
+                logit = model(input_emb[:, :EMBEDDING_DIM], input_emb[:, EMBEDDING_DIM:])
+                # print(f"Evaluating {card_name} against deck embeddings. logit shape: {logit.shape}, logit: {logit}")
+                score = torch.sigmoid(logit).item()
+                scores.append(score)
+
+            # Weighted score: prefer cards that synergize broadly across deck
+            avg_score = sum(scores) / len(scores)
+            max_score = max(scores)
+            final_score = 0.7 * avg_score + 0.3 * max_score  # tunable weights
+
+            candidates.append((card_name, final_score))
+
+    candidates.sort(key=lambda x: x[1], reverse=True)
+    return candidates[:top_n]
+
+
 def decklist_to_array(decklist):
     """
     Convert a decklist string into a list of card names.
@@ -78,8 +127,10 @@ if __name__ == "__main__":
 1 Blind Obedience
 1 Bloodchief Ascension
 1 Cleric Class
+1 Liesa, Shroud of Dusk
 """
     current_deck = decklist_to_array(deck)
+    commander = "Liesa, Shroud of Dusk"
     #get 30 cards from the deck at random
     if len(current_deck) > 30:
         current_deck = random.sample(current_deck, 30)
@@ -94,14 +145,26 @@ if __name__ == "__main__":
     model.load_state_dict(torch.load(CHECKPOINT_FILE))
     model.eval()
 
-    print(" Recommending cards...")
-    top_recommendations = recommend_cards(current_deck, all_embeddings, model)
+    # print(" Recommending cards...")
+    # top_recommendations = recommend_cards(current_deck, all_embeddings, model)
 
-    print("\n Top Recommendations:")
-    for name, score in top_recommendations:
+    # print("\n Top Recommendations:")
+    # for name, score in top_recommendations:
+    #     print(f"{name}: {score:.3f}")
+
+    # for name in current_deck:
+    #     print(name)
+    # for name, _ in top_recommendations :
+    #     print(name)
+
+    print("\n Recommending cards with commander...")
+    top_recommendations_commander = recommend_cards_commander(
+        current_deck, all_embeddings, all_cards, model, commander_name=commander
+    )
+    print("\n Top Recommendations with Commander:")
+    for name, score in top_recommendations_commander:
         print(f"{name}: {score:.3f}")
-
     for name in current_deck:
         print(name)
-    for name, _ in top_recommendations :
+    for name, _ in top_recommendations_commander:
         print(name)

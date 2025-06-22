@@ -19,6 +19,7 @@ def format_card_for_bert(card):
     power = card.get("power", "")
     toughness = card.get("toughness", "")
     colors = ", ".join(card.get("colors", []))
+    color_identity = ", ".join(card.get("color_identity", []))
 
     # Flatten keyword dictionary into readable form
     keywords = card.get("keywords", [])
@@ -37,6 +38,7 @@ def format_card_for_bert(card):
         f"Oracle Text: {oracle_text}. "
         f"Power/Toughness: {power}/{toughness}. "
         f"Colors: {colors}. "
+        f"Color Identity: {color_identity}. "
         f"Keywords: {keyword_text}."
     )
 
