@@ -102,8 +102,9 @@ class JointCardDataset(Dataset):
         self.counts = [0,0,0,0]
         for synergy in self.synergy_data:
             if "synergy_edhrec" in synergy:
-                self.counts[0] += 1
-                if synergy["synergy"] == 0:
+                if synergy.get("synergy", 0) == 1:
+                    self.counts[0] += 1
+                else:
                     self.counts[1] += 1
             elif synergy.get("synergy", 0) == 1:
                 self.counts[2] += 1
