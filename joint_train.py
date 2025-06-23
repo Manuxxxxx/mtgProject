@@ -797,7 +797,7 @@ def train_joint_model(config):
         desc="Epochs",
         initial=start_epoch
     ):
-
+        print_separator()
         train_loop(
             bert_model,
             synergy_model,
@@ -814,7 +814,9 @@ def train_joint_model(config):
             use_empty_cache=config.get("use_empty_cache", False),
             calc_metrics=config.get("train_calc_metrics", False)
         )
+        
         if (epoch + 1) % config["save_every"] == 0:
+            print_separator()
             bert_model_path = os.path.join(
                 save_full_dir, f"bert_model_epoch_{epoch + 1}.pth"
             )
@@ -833,6 +835,7 @@ def train_joint_model(config):
             print(f"Saved models at epoch {epoch + 1}")
 
         if (epoch + 1) % config["eval_every"] == 0:
+            print_separator()
             for split_name, loader in data_loaders.items():
                 if split_name.startswith("val"):
                     eval_loop(
