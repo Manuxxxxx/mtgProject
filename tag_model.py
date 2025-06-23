@@ -44,3 +44,35 @@ class TagModel(nn.Module):
         if self.use_sigmoid_output:
             return torch.sigmoid(x)
         return x
+    
+def init_tag_model_weights(m):
+    if isinstance(m, nn.Linear):
+        nn.init.kaiming_uniform_(m.weight, nonlinearity='leaky_relu')
+        if m.bias is not None:
+            nn.init.zeros_(m.bias)
+    elif isinstance(m, nn.BatchNorm1d):
+        nn.init.ones_(m.weight)
+        nn.init.zeros_(m.bias)
+
+def build_tag_model(
+    arch_name: str,
+    input_dim: int,
+    hidden_dims: list,
+    output_dim: int,
+    dropout: float = 0.3,
+    use_batchnorm: bool = True,
+    use_sigmoid_output: bool = False
+):
+    if arch_name != "tagModel":
+        raise ValueError(f"Unknown tag model architecture: {arch_name}")
+    
+    model = TagModel(
+        input_dim=input_dim,
+        hidden_dims=hidden_dims,
+        output_dim=output_dim,
+        dropout=dropout,
+        use_batchnorm=use_batchnorm,
+        use_sigmoid_output=use_sigmoid_output
+    )
+    model.apply(init_tag_model_weights)
+    return model

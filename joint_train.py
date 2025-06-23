@@ -17,7 +17,7 @@ import time
 import sys
 from torch.amp import autocast, GradScaler
 import shutil
-from tag_model import TagModel
+from tag_model import TagModel, build_tag_model, init_tag_model_weights
 
 from synergy_model import (
     build_model,
@@ -46,7 +46,7 @@ def set_seed(seed: int = 42):
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
-    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None, dataset_name="joint"):
+    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None, dataset_name="joint", debug_dataset=False):
         synergy_data = json.load(open(synergy_data, "r"))
         card_data = json.load(open(card_data, "r"))
 
@@ -91,7 +91,8 @@ class JointCardDataset(Dataset):
                         self.total_tag_samples += 1
 
         self.calculate_synergy_counts()
-        self.print_synergy()
+        if debug_dataset:
+            self.print_synergy()
 
 
 
@@ -604,6 +605,7 @@ def create_dataloaders(config, tokenizer, index_splits):
             tags_len=config.get("tag_output_dim", None),
             subset_indices=indices,
             dataset_name=split_name,
+            debug_dataset=True,
         )
 
         is_train = split_name == "train"
@@ -671,6 +673,9 @@ def setup_dirs_writer(config):
     
     return writer, save_full_dir, start_epoch
 
+def print_separator():
+    print("=" * 30)
+
 def train_joint_model(config):
     
     # Set up directories and writer
@@ -696,15 +701,19 @@ def train_joint_model(config):
         real_indices, fake_indices, splits, log_splits=True
     )
 
+    print_separator()
+
     # Step 2: Initialize BERT model and tokenizer
     model_name = config["bert_model_name"]
     embedding_dim = config.get("embedding_dim", 384)
     bert_model, tokenizer, device = initialize_bert_model(model_name, embedding_dim)
 
+    print_separator()
     data_loaders = create_dataloaders(config, tokenizer, split_indices_result)
 
-    train_loader = data_loaders["train"]
 
+    train_loader = data_loaders["train"]
+    print_separator()
     # Models loading
 
     if config["bert_checkpoint"] and config["bert_checkpoint"] != "":
@@ -734,13 +743,14 @@ def train_joint_model(config):
     tag_model_pos_weight = None
     if config.get("use_tag_model", None):
 
-        tag_model = TagModel(
-            input_dim=config["embedding_dim"],
-            hidden_dims=config.get("tag_hidden_dims", [512,256]),
+        tag_model = build_tag_model(
+            "tagModel",
+            input_dim=config.get("tag_input_dim", 384),
             output_dim=config.get("tag_output_dim", 271),
-            dropout=config.get("tag_dropout", 0.2),
-            use_batchnorm=True,
-            use_sigmoid_output=False
+            hidden_dims=config.get("tag_hidden_dims", [512, 256]),
+            dropout=config.get("tag_dropout", 0.3),
+            use_batchnorm=config.get("tag_use_batchnorm", True),
+            use_sigmoid_output=config.get("tag_use_sigmoid_output", False)
         ).to(device)
 
         
@@ -759,8 +769,9 @@ def train_joint_model(config):
         config, bert_model, synergy_model, device, tag_model=tag_model, tag_model_pos_weight=tag_model_pos_weight, synergy_model_pos_weight=synergy_model_pos_weight
     )
 
-    test_at_start_sets = config.get("test_at_start", None)
+    test_at_start_sets = config.get("test_at_start_sets", None)
     if test_at_start_sets is not None:
+        print_separator()
         print("Running initial evaluation on test sets...")
         for split_name, loader in data_loaders.items():
             if split_name in test_at_start_sets:
@@ -779,6 +790,8 @@ def train_joint_model(config):
                     tag_loss_weight=config.get("tag_loss_weight", 1.0),
                 )
 
+    print_separator()
+    print(f"Starting training for {config['epochs']} epochs...\n")
     for epoch in tqdm(
         range(start_epoch, config["epochs"]),
         desc="Epochs",
