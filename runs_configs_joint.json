@@ -31,9 +31,15 @@
       "tag_output_dim": 271,
       "tag_loss_weight": 1.0,
       "tag_dropout": 0.3,
-      "start_epoch": null
-      
-
+      "start_epoch": null,
+      "train_calc_metrics": false,
+      "test_at_start_sets": ["val_real","val_real_fake" ],
+      "splits" : {
+        "train": {"real": 0.8, "fake": 0.1},
+        "val_real": {"real": 0.1, "fake": 0.0},
+        "val_real_fake": {"real": 0.1, "fake": 0.03}
+      }
+    
     },
     {
       "run_name": "complexSin_distilbert_tag3_AdamW",
@@ -67,7 +73,8 @@
       "tag_output_dim": 271,
       "tag_loss_weight": 3.0,
       "tag_dropout": 0.3,
-      "start_epoch": null
+      "start_epoch": null,
+      "train_calc_metrics": false
       
 
     },{
@@ -97,7 +104,8 @@
       "log_dir": "runs/joint_training_tag",
       "save_dir": "checkpoints/joint_training_tag",
       "use_tag_model": false,
-      "start_epoch": null
+      "start_epoch": null,
+      "train_calc_metrics": false
       
 
     }
