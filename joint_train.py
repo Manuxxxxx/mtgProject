@@ -55,7 +55,7 @@ class JointCardDataset(Dataset):
             self.synergy_data = [self.synergy_data[i] for i in subset_indices]
 
         self.tokenizer = tokenizer
-        self.card_lookup = build_card_lookup(card_data)
+        self.build_card_lookup(card_data)
         self.max_length = max_length
         self.tags_len = tags_len
         self.dataset_name = dataset_name
@@ -117,7 +117,7 @@ class JointCardDataset(Dataset):
                 f"Real Synergy = 0: {self.counts[1]},"
                 f"Fake Synergy = 1: {self.counts[2]},"  
                 f"Fake Synergy = 0: {self.counts[3]}"
- )
+    )
 
     def __getitem__(self, idx):
         entry = self.synergy_data[idx]
@@ -198,29 +198,28 @@ class JointCardDataset(Dataset):
         # Not found
         return None
 
+    def build_card_lookup(self, card_data):
+        """
+        Build a dictionary mapping card names to their full data.
 
-def build_card_lookup(card_data):
-    """
-    Build a dictionary mapping card names to their full data.
+        Args:
+            card_data (list): List of card dictionaries, each with a 'name' key.
 
-    Args:
-        card_data (list): List of card dictionaries, each with a 'name' key.
+        Returns:
+            dict: A lookup dict of {card_name: card_dict}
+        """
+        if not isinstance(card_data, list):
+            raise ValueError("Expected card_data to be a list of dicts.")
 
-    Returns:
-        dict: A lookup dict of {card_name: card_dict}
-    """
-    if not isinstance(card_data, list):
-        raise ValueError("Expected card_data to be a list of dicts.")
+        card_lookup = {}
+        for i, card in enumerate(card_data):
+            if not isinstance(card, dict):
+                raise TypeError(f"Item at index {i} is not a dict: {card!r}")
+            if "name" not in card:
+                raise KeyError(f"Missing 'name' key in card at index {i}: {card!r}")
+            card_lookup[card["name"]] = card
 
-    card_lookup = {}
-    for i, card in enumerate(card_data):
-        if not isinstance(card, dict):
-            raise TypeError(f"Item at index {i} is not a dict: {card!r}")
-        if "name" not in card:
-            raise KeyError(f"Missing 'name' key in card at index {i}: {card!r}")
-        card_lookup[card["name"]] = card
-
-    return card_lookup
+        self.card_lookup = card_lookup
 
 
 def get_real_fake_indices(synergy_file):
@@ -311,9 +310,9 @@ def train_loop(
     synergy_model.train()
     if tag_model is not None:
         tag_model.train()
+    total_synergy_loss = 0.0
+    total_tag_loss = 0.0
     if calc_metrics:
-        total_synergy_loss = 0.0
-        total_tag_loss = 0.0
         all_preds_synergy, all_labels_synergy = [], []
         if tag_model is not None:
             all_preds_tag, all_labels_tag = [], []
@@ -377,9 +376,11 @@ def train_loop(
             if use_empty_cache:
                 torch.cuda.empty_cache()
 
+        total_synergy_loss += weighted_loss_synergy.item()  # already scaled back for logging
+        total_tag_loss += tag_loss.item() * tag_loss_weight
+        
         if calc_metrics:
-            total_synergy_loss += weighted_loss_synergy.item()  # already scaled back for logging
-            total_tag_loss += tag_loss.item() * tag_loss_weight
+            
             all_preds_synergy.extend(preds_synergy.cpu().numpy())
             all_labels_synergy.extend(labels_synergy.cpu().numpy().astype(int))
             if tag_model is not None:
@@ -394,18 +395,30 @@ def train_loop(
         scaler.update()
         optimizer.zero_grad()
 
-    if calc_metrics:
-        avg_loss = (total_tag_loss+total_synergy_loss) / len(dataloader)
-        avg_synergy_loss = total_synergy_loss / len(dataloader)
+    avg_loss = (total_tag_loss+total_synergy_loss) / len(dataloader)
+    avg_synergy_loss = total_synergy_loss / len(dataloader)
+
+    writer.add_scalar("Train/Loss", avg_loss, epoch)
+    writer.add_scalar("Train/Synergy Loss", avg_synergy_loss, epoch)
+    
+    if tag_model is not None:
         avg_tag_loss = total_tag_loss / len(dataloader)
+        writer.add_scalar("Train/ Tag Loss", avg_tag_loss, epoch)
+        print(f"Train | Loss: {avg_loss:.4f}  "
+              f"| Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f} |")
+    else:
+        print(f"Train | Synergy Loss: {avg_synergy_loss:.4f}")
+
+
+    if calc_metrics:
+        
         precision_synergy = precision_score(all_labels_synergy, all_preds_synergy, zero_division=0)
         recall_synergy = recall_score(all_labels_synergy, all_preds_synergy, zero_division=0)
         f1_synergy = f1_score(all_labels_synergy, all_preds_synergy, zero_division=0)
         cm_synergy = confusion_matrix(all_labels_synergy, all_preds_synergy)
 
         print(
-            f"Train | Loss: {avg_loss:.4f} | Precision: {precision_synergy:.4f} | Recall: {recall_synergy:.4f} | F1: {f1_synergy:.4f} | "
-            f"Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f}"
+            f"Train | Precision Synergy: {precision_synergy:.4f} | Recall Synergy: {recall_synergy:.4f} | F1 Synergy: {f1_synergy:.4f} |"
         )
 
         if tag_model is not None:
@@ -413,16 +426,12 @@ def train_loop(
             precision_tag = precision_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
             recall_tag = recall_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
             f1_tag = f1_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
-            print(f"Train | Tag Loss: {avg_tag_loss:.4f}  "
-                f"| Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
+            print(f"Train | Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
             
-            writer.add_scalar("Train/ Tag Loss", avg_tag_loss, epoch)
             writer.add_scalar("Train_tag/ Precision", precision_tag, epoch)
             writer.add_scalar("Train_tag/ Recall", recall_tag, epoch)
             writer.add_scalar("Train_tag/ F1", f1_tag, epoch)
 
-        writer.add_scalar("Train/Loss", avg_loss, epoch)
-        writer.add_scalar("Train/Synergy Loss", avg_synergy_loss, epoch)
         writer.add_scalar("Train/Precision", precision_synergy, epoch)
         writer.add_scalar("Train/Recall", recall_synergy, epoch)
         writer.add_scalar("Train/F1", f1_synergy, epoch)
