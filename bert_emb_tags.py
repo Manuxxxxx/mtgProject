@@ -70,6 +70,7 @@ class BertEmbedRegressor(nn.Module):
         elif model_name == "distilbert-base-uncased":
             print("Using DistilBertModel")
             self.bert = DistilBertModel.from_pretrained('distilbert-base-uncased')
+        self.layer_norm = nn.LayerNorm(self.bert.config.hidden_size)
         self.dropout = nn.Dropout(0.2)
         self.linear = nn.Linear(self.bert.config.hidden_size, output_dim)
         self.model_name = model_name
@@ -77,15 +78,16 @@ class BertEmbedRegressor(nn.Module):
     def forward(self, input_ids, attention_mask):
         outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
 
+
         if self.model_name == "distilbert-base-uncased":
             cls_emb = outputs.last_hidden_state[:, 0, :]
-            return self.linear(self.dropout(cls_emb))
         elif self.model_name == "bert-base-uncased":
-            pooled = outputs.pooler_output
-            return self.linear(self.dropout(pooled))
+            cls_emb = outputs.pooler_output
         else:
             #error handling for unsupported models
             raise ValueError(f"Model {self.model_name} is not supported for this task.")
+        
+        return self.linear(self.dropout(self.layer_norm(cls_emb)))
 
 # ----------------------
 # Training Utilities with tqdm

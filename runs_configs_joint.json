@@ -1,8 +1,9 @@
   [
     {
-      "run_name": "complex_noTrainBertMini_AdamW",
-      "bert_checkpoint": "",
+      "run_name": "complexSin_distilbert_tag1_AdamW",
+      "bert_checkpoint": null,
       "bert_model_name": "distilbert-base-uncased",
+      "run_name_previous": null,
       "embedding_dim": 384,
       "max_length_bert_tokenizer": 256,
       "synergy_arch": "modelComplex",
@@ -12,25 +13,35 @@
       "optimizer_config": {
         "weight_decay": 0.01
       },
-      "epochs": 30,
+      "epochs": 12,
       "batch_size": 5,
-      "accumulation_steps": 2,
+      "accumulation_steps": 4,
       "use_empty_cache": false,
       "eval_every": 1,
       "save_every": 1,
-      "BCEweight": 1.0,
+      "synergy_pos_weight": null,
       "false_positive_penalty": 1.0,
       "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
-      "bulk_file": "datasets/processed/indent/commander_legal_cards20250609112722.json",
-      "log_dir": "runs/joint_training",
-      "save_dir": "checkpoints/joint_training"
+      "bulk_file": "datasets/processed/tag_included/cards_with_tags_20250622170810.json",
+      "log_dir": "runs/joint_training_tag",
+      "save_dir": "checkpoints/joint_training_tag",
+      "tag_learning_rate": 1e-4,
+      "use_tag_model": true,
+      "tag_hidden_dims": [512, 256],
+      "tag_output_dim": 271,
+      "tag_loss_weight": 1.0,
+      "tag_dropout": 0.3,
+      "start_epoch": null
+      
+
     },
     {
-      "run_name": "complex_preTrainBert_AdamW",
-      "bert_checkpoint": "checkpoints/bert_embed_regression20250515-175957/model_epoch_12.pth",
-      "bert_model_name": "bert-base-uncased",
+      "run_name": "complexSin_distilbert_tag3_AdamW",
+      "bert_checkpoint": null,
+      "bert_model_name": "distilbert-base-uncased",
+      "run_name_previous": null,
       "embedding_dim": 384,
-      "max_length_bert_tokenizer": 280,
+      "max_length_bert_tokenizer": 256,
       "synergy_arch": "modelComplex",
       "synergy_learning_rate": 1e-4,
       "bert_learning_rate": 2e-5,
@@ -38,18 +49,57 @@
       "optimizer_config": {
         "weight_decay": 0.01
       },
-      "epochs": 30,
-      "batch_size": 6,
+      "epochs": 12,
+      "batch_size": 5,
       "accumulation_steps": 4,
-      "use_empty_cache": true,
+      "use_empty_cache": false,
       "eval_every": 1,
       "save_every": 1,
-      "BCEweight": 1.0,
+      "synergy_pos_weight": null,
       "false_positive_penalty": 1.0,
       "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
-      "bulk_file": "datasets/processed/indent/commander_legal_cards20250609112722.json",
-      "log_dir": "runs/joint_training",
-      "save_dir": "checkpoints/joint_training"
+      "bulk_file": "datasets/processed/tag_included/cards_with_tags_20250622170810.json",
+      "log_dir": "runs/joint_training_tag",
+      "save_dir": "checkpoints/joint_training_tag",
+      "tag_learning_rate": 1e-4,
+      "use_tag_model": true,
+      "tag_hidden_dims": [512, 256],
+      "tag_output_dim": 271,
+      "tag_loss_weight": 3.0,
+      "tag_dropout": 0.3,
+      "start_epoch": null
+      
+
+    },{
+      "run_name": "complexSin_distilbert_AdamW",
+      "bert_checkpoint": null,
+      "bert_model_name": "distilbert-base-uncased",
+      "run_name_previous": null,
+      "embedding_dim": 384,
+      "max_length_bert_tokenizer": 256,
+      "synergy_arch": "modelComplex",
+      "synergy_learning_rate": 1e-4,
+      "bert_learning_rate": 2e-5,
+      "optimizer": "AdamW",
+      "optimizer_config": {
+        "weight_decay": 0.01
+      },
+      "epochs": 12,
+      "batch_size": 5,
+      "accumulation_steps": 4,
+      "use_empty_cache": false,
+      "eval_every": 1,
+      "save_every": 1,
+      "synergy_pos_weight": null,
+      "false_positive_penalty": 1.0,
+      "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
+      "bulk_file": "datasets/processed/tag_included/cards_with_tags_20250622170810.json",
+      "log_dir": "runs/joint_training_tag",
+      "save_dir": "checkpoints/joint_training_tag",
+      "use_tag_model": false,
+      "start_epoch": null
+      
+
     }
   ]
     

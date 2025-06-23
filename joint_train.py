@@ -46,7 +46,7 @@ def set_seed(seed: int = 42):
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
-    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None):
+    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None, dataset_name="joint"):
         synergy_data = json.load(open(synergy_data, "r"))
         card_data = json.load(open(card_data, "r"))
 
@@ -58,6 +58,7 @@ class JointCardDataset(Dataset):
         self.card_lookup = build_card_lookup(card_data)
         self.max_length = max_length
         self.tags_len = tags_len
+        self.dataset_name = dataset_name
         
         if tags_len is not None:
             all_tags = set()
@@ -70,28 +71,51 @@ class JointCardDataset(Dataset):
                 raise ValueError(
                     f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                 )
+            self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
+            self.total_tag_samples = 0
+
+            for synergy_pair in self.synergy_data:
+                card1 = self.find_card_by_name(synergy_pair["card1"]["name"])
+                card2 = self.find_card_by_name(synergy_pair["card2"]["name"])
+
+                if card1:
+                    vec1 = self.hot_encode_tags(card1)
+                    if vec1.shape[0] > 0:
+                        self.tag_counts += vec1
+                        self.total_tag_samples += 1
+
+                if card2:
+                    vec2 = self.hot_encode_tags(card2)
+                    if vec2.shape[0] > 0:
+                        self.tag_counts += vec2
+                        self.total_tag_samples += 1
+
+        self.calculate_synergy_counts()
+        self.print_synergy()
+
 
 
     def __len__(self):
         return len(self.synergy_data)
     
-    def print_synergy(self):
-        counts = [0,0,0,0]
+    def calculate_synergy_counts(self):
+        self.counts = [0,0,0,0]
         for synergy in self.synergy_data:
             if "synergy_edhrec" in synergy:
-                counts[0] += 1
+                self.counts[0] += 1
                 if synergy["synergy"] == 0:
-                    counts[1] += 1
+                    self.counts[1] += 1
             elif synergy.get("synergy", 0) == 1:
-                counts[2] += 1
+                self.counts[2] += 1
             else:
-                counts[3] += 1
+                self.counts[3] += 1
 
-        print(f"Dataset counts: "
-                f"Real Synergy = 1: {counts[0]},"
-                f"Real Synergy = 0: {counts[1]},"
-                f"Fake Synergy = 1: {counts[2]},"  
-                f"Fake Synergy = 0: {counts[3]}"
+    def print_synergy(self):
+        print(f"Dataset {self.dataset_name} counts: "
+                f"Real Synergy = 1: {self.counts[0]},"
+                f"Real Synergy = 0: {self.counts[1]},"
+                f"Fake Synergy = 1: {self.counts[2]},"  
+                f"Fake Synergy = 0: {self.counts[3]}"
  )
 
     def __getitem__(self, idx):
@@ -123,7 +147,7 @@ class JointCardDataset(Dataset):
             max_length=self.max_length,
             return_tensors="pt",
         )
-        label = torch.tensor([entry.get("synergy", 0)], dtype=torch.float)
+        label = torch.tensor([entry.get("synergy", 0)], dtype=torch.float32)
 
         tag_hot1 = self.hot_encode_tags(card1)
         tag_hot2 = self.hot_encode_tags(card2)
@@ -145,7 +169,7 @@ class JointCardDataset(Dataset):
         if self.tags_len is None:
             return torch.zeros(0, dtype=torch.float32)
         if "tags" not in card or not card["tags"]:
-            return torch.zeros(self.tags_len, dtype=torch.float)
+            return torch.zeros(self.tags_len, dtype=torch.float32)
         
         
         tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
@@ -219,7 +243,7 @@ def get_real_fake_indices(synergy_file):
     return real_indices, fake_indices
 
 
-def build_training_components(config, bert_model, synergy_model, device, tag_model=None):
+def build_training_components(config, bert_model, synergy_model, device, tag_model=None, tag_model_pos_weight=None, synergy_model_pos_weight=1.0):
     optimizer = build_joint_optimizer(
         config["optimizer"],
         bert_model,
@@ -233,9 +257,11 @@ def build_training_components(config, bert_model, synergy_model, device, tag_mod
     )
 
     loss_fn = nn.BCEWithLogitsLoss(
-        pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device)
-    )
-    loss_tag_fn = nn.BCEWithLogitsLoss().to(device) if tag_model is not None else None
+        pos_weight=torch.tensor(synergy_model_pos_weight).to(device)
+    )   
+
+    if tag_model is not None and tag_model_pos_weight is not None:
+        loss_tag_fn = nn.BCEWithLogitsLoss().to(device)
 
     return optimizer, loss_fn, loss_tag_fn
 
@@ -266,13 +292,13 @@ def train_loop(
     tag_model,
     dataloader,
     optimizer,
-    loss_fn,
+    loss_synergy_model,
     loss_tag_model,
     epoch,
     writer,
     device,
     false_positive_penalty=1.0,
-    tag_loss_weight=0.5,
+    tag_loss_weight=1,
     accumulation_steps=1,
     use_empty_cache=False,
 ):
@@ -283,7 +309,9 @@ def train_loop(
         tag_model.train()
     total_synergy_loss = 0.0
     total_tag_loss = 0.0
-    all_preds, all_labels = [], []
+    all_preds_synergy, all_labels_synergy = [], []
+    if tag_model is not None:
+        all_preds_tag, all_labels_tag = [], []
 
     scaler = GradScaler()
 
@@ -294,7 +322,7 @@ def train_loop(
         attention_mask1 = batch["attention_mask1"].to(device)
         input_ids2 = batch["input_ids2"].to(device)
         attention_mask2 = batch["attention_mask2"].to(device)
-        labels = batch["label"].to(device)
+        labels_synergy = batch["label"].to(device)
 
         tag_hot1 = None
         tag_hot2 = None
@@ -318,15 +346,18 @@ def train_loop(
                 tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
                 tag_loss = (tag_loss1 + tag_loss2) / 2.0
 
+                preds_tag1 = torch.sigmoid(tags_pred1)
+                preds_tag2 = torch.sigmoid(tags_pred2)
+                
             # Forward pass through synergy model
-            logits = synergy_model(embed1, embed2)
+            logits_synergy = synergy_model(embed1, embed2)
 
-            weighted_loss, preds, _ = calculate_weighted_loss(
-                logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
+            weighted_loss_synergy, preds_synergy, _ = calculate_weighted_loss(
+                logits_synergy, labels_synergy, loss_synergy_model, false_positive_penalty=false_positive_penalty
             )
 
             # Combine losses
-            full_loss = weighted_loss + tag_loss_weight * tag_loss
+            full_loss = weighted_loss_synergy + tag_loss_weight * tag_loss
             # Normalize loss for gradient accumulation
             loss_scaled = full_loss / accumulation_steps
 
@@ -341,10 +372,15 @@ def train_loop(
             if use_empty_cache:
                 torch.cuda.empty_cache()
 
-        total_synergy_loss += weighted_loss.item()  # already scaled back for logging
+        total_synergy_loss += weighted_loss_synergy.item()  # already scaled back for logging
         total_tag_loss += tag_loss.item() * tag_loss_weight
-        all_preds.extend(preds.cpu().numpy())
-        all_labels.extend(labels.cpu().numpy().astype(int))
+        all_preds_synergy.extend(preds_synergy.cpu().numpy())
+        all_labels_synergy.extend(labels_synergy.cpu().numpy().astype(int))
+        if tag_model is not None:
+            all_preds_tag.extend(preds_tag1.detach().cpu().numpy())
+            all_preds_tag.extend(preds_tag2.detach().cpu().numpy())
+            all_labels_tag.extend(tag_hot1.cpu().numpy())
+            all_labels_tag.extend(tag_hot2.cpu().numpy())
 
     # Final step if dataset isn't divisible by accumulation_steps
     if (step + 1) % accumulation_steps != 0:
@@ -355,37 +391,46 @@ def train_loop(
     avg_loss = (total_tag_loss+total_synergy_loss) / len(dataloader)
     avg_synergy_loss = total_synergy_loss / len(dataloader)
     avg_tag_loss = total_tag_loss / len(dataloader)
-    precision = precision_score(all_labels, all_preds, zero_division=0)
-    recall = recall_score(all_labels, all_preds, zero_division=0)
-    f1 = f1_score(all_labels, all_preds, zero_division=0)
-    cm = confusion_matrix(all_labels, all_preds)
+    precision_synergy = precision_score(all_labels_synergy, all_preds_synergy, zero_division=0)
+    recall_synergy = recall_score(all_labels_synergy, all_preds_synergy, zero_division=0)
+    f1_synergy = f1_score(all_labels_synergy, all_preds_synergy, zero_division=0)
+    cm_synergy = confusion_matrix(all_labels_synergy, all_preds_synergy)
 
     print(
-        f"Train | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} | F1: {f1:.4f} | "
+        f"Train | Loss: {avg_loss:.4f} | Precision: {precision_synergy:.4f} | Recall: {recall_synergy:.4f} | F1: {f1_synergy:.4f} | "
         f"Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f}"
     )
-    print(f"Train | Confusion Matrix:\n")
-    print(f"Total | TP: {cm[1,1]}, TN: {cm[0,0]}, FP: {cm[0,1]}, FN: {cm[1,0]}")
+
+    if tag_model is not None:
+        precision_tag = precision_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        recall_tag = recall_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        f1_tag = f1_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        print(f"Train | Tag Loss: {avg_tag_loss:.4f}  "
+              f"| Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
+        
+        writer.add_scalar("Train/ Tag Loss", avg_tag_loss, epoch)
+        writer.add_scalar("Train_tag/ Precision", precision_tag, epoch)
+        writer.add_scalar("Train_tag/ Recall", recall_tag, epoch)
+        writer.add_scalar("Train_tag/ F1", f1_tag, epoch)
 
     writer.add_scalar("Train/Loss", avg_loss, epoch)
     writer.add_scalar("Train/Synergy Loss", avg_synergy_loss, epoch)
-    writer.add_scalar("Train/Tag Loss", avg_tag_loss, epoch)
-    writer.add_scalar("Train/Precision", precision, epoch)
-    writer.add_scalar("Train/Recall", recall, epoch)
-    writer.add_scalar("Train/F1", f1, epoch)
-    writer.add_scalar("Train/TP", cm[1, 1], epoch)
-    writer.add_scalar("Train/TN", cm[0, 0], epoch)
-    writer.add_scalar("Train/FP", cm[0, 1], epoch)
-    writer.add_scalar("Train/FN", cm[1, 0], epoch)
+    writer.add_scalar("Train/Precision", precision_synergy, epoch)
+    writer.add_scalar("Train/Recall", recall_synergy, epoch)
+    writer.add_scalar("Train/F1", f1_synergy, epoch)
+    writer.add_scalar("Train_cmSin/TP", cm_synergy[1, 1], epoch)
+    writer.add_scalar("Train_cmSin/TN", cm_synergy[0, 0], epoch)
+    writer.add_scalar("Train_cmSin/FP", cm_synergy[0, 1], epoch)
+    writer.add_scalar("Train_cmSin/FN", cm_synergy[1, 0], epoch)
 
-    return avg_loss, precision, recall, f1, cm
+    return avg_loss, precision_synergy, recall_synergy, f1_synergy, cm_synergy
 
 
 def eval_loop(
     bert_model,
     synergy_model,
     dataloader,
-    loss_fn,
+    loss_synergy_model,
     epoch,
     writer,
     device,
@@ -393,7 +438,7 @@ def eval_loop(
     false_positive_penalty=1.0,
     tag_model=None,
     loss_tag_model=None,
-    tag_loss_weight=0.5,
+    tag_loss_weight=1.0,
 ):
     bert_model.eval()
     synergy_model.eval()
@@ -402,7 +447,9 @@ def eval_loop(
 
     total_synergy_loss = 0.0
     total_tag_loss = 0.0
-    all_preds, all_labels = [], []
+    all_preds_sinergy, all_labels_sinergy = [], []
+    if tag_model is not None:
+        all_preds_tag, all_labels_tag = [], []
 
     with torch.no_grad():
         for batch in tqdm(dataloader, desc=f"{label} Eval"):
@@ -410,7 +457,7 @@ def eval_loop(
             attention_mask1 = batch["attention_mask1"].to(device)
             input_ids2 = batch["input_ids2"].to(device)
             attention_mask2 = batch["attention_mask2"].to(device)
-            labels = batch["label"].to(device)
+            labels_synergy = batch["label"].to(device)
 
             tag_hot1 = batch.get("tag_hot1")
             tag_hot2 = batch.get("tag_hot2")
@@ -431,45 +478,65 @@ def eval_loop(
                 tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
                 tag_loss = (tag_loss1 + tag_loss2) / 2.0
 
+                preds_tag1 = torch.sigmoid(tags_pred1)
+                preds_tag2 = torch.sigmoid(tags_pred2)
+
+                
+
             # Synergy model
-            logits = synergy_model(embed1, embed2)
-            weighted_loss, preds, _ = calculate_weighted_loss(
-                logits, labels, loss_fn, false_positive_penalty=false_positive_penalty
+            logits_synergy = synergy_model(embed1, embed2)
+            weighted_loss_synergy, preds_synergy, _ = calculate_weighted_loss(
+                logits_synergy, labels_synergy, loss_synergy_model, false_positive_penalty=false_positive_penalty
             )
 
-            total_synergy_loss += weighted_loss.item()
+            total_synergy_loss += weighted_loss_synergy.item()
             total_tag_loss += tag_loss.item() * tag_loss_weight
-            all_preds.extend(preds.cpu().numpy())
-            all_labels.extend(labels.cpu().numpy().astype(int))
+            all_preds_sinergy.extend(preds_synergy.cpu().numpy())
+            all_labels_sinergy.extend(labels_synergy.cpu().numpy().astype(int))
+            if tag_model is not None:
+                all_preds_tag.extend(preds_tag1.cpu().numpy())
+                all_preds_tag.extend(preds_tag2.cpu().numpy())
+                all_labels_tag.extend(tag_hot1.cpu().numpy())
+                all_labels_tag.extend(tag_hot2.cpu().numpy())
 
     avg_loss = (total_synergy_loss + total_tag_loss) / len(dataloader)
     avg_synergy_loss = total_synergy_loss / len(dataloader)
     avg_tag_loss = total_tag_loss / len(dataloader)
 
-    precision = precision_score(all_labels, all_preds, zero_division=0)
-    recall = recall_score(all_labels, all_preds, zero_division=0)
-    f1 = f1_score(all_labels, all_preds, zero_division=0)
-    cm = confusion_matrix(all_labels, all_preds)
+    precision_sinergy = precision_score(all_labels_sinergy, all_preds_sinergy, zero_division=0)
+    recall_synergy = recall_score(all_labels_sinergy, all_preds_sinergy, zero_division=0)
+    f1_synergy = f1_score(all_labels_sinergy, all_preds_sinergy, zero_division=0)
+    cm_synergy = confusion_matrix(all_labels_sinergy, all_preds_sinergy)
+
 
     print(
-        f"{label} | Loss: {avg_loss:.4f} | Precision: {precision:.4f} | Recall: {recall:.4f} "
-        f"| F1: {f1:.4f} | Synergy Loss: {avg_synergy_loss:.4f} | Tag Loss: {avg_tag_loss:.4f}"
+        f"{label} | Loss: {avg_loss:.4f}  "
+        f"| Synergy Loss: {avg_synergy_loss:.4f} | Precision Synergy: {precision_sinergy:.4f} | Recall Synergy: {recall_synergy:.4f} | F1 Synergy: {f1_synergy:.4f} |"
     )
-    print(f"{label} | Confusion Matrix:\n")
-    print(f"{label} | TP: {cm[1, 1]}, TN: {cm[0, 0]}, FP: {cm[0, 1]}, FN: {cm[1, 0]}")
+    if tag_model is not None:
+        precision_tag = precision_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        recall_tag = recall_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        f1_tag = f1_score(all_labels_tag, all_preds_tag, average='macro', zero_division=0)
+        print(f"{label} | Tag Loss: {avg_tag_loss:.4f}  "
+              f"| Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
+        
+        writer.add_scalar(f"{label}/Tag Loss", avg_tag_loss, epoch)
+        writer.add_scalar(f"{label}_tag/ Precision", precision_tag, epoch)
+        writer.add_scalar(f"{label}_tag/ Recall", recall_tag, epoch)
+        writer.add_scalar(f"{label}_tag/ F1", f1_tag, epoch)
+
 
     writer.add_scalar(f"{label}/Loss", avg_loss, epoch)
     writer.add_scalar(f"{label}/Synergy Loss", avg_synergy_loss, epoch)
-    writer.add_scalar(f"{label}/Tag Loss", avg_tag_loss, epoch)
-    writer.add_scalar(f"{label}/Precision", precision, epoch)
-    writer.add_scalar(f"{label}/Recall", recall, epoch)
-    writer.add_scalar(f"{label}/F1", f1, epoch)
-    writer.add_scalar(f"{label}/TP", cm[1, 1], epoch)
-    writer.add_scalar(f"{label}/TN", cm[0, 0], epoch)
-    writer.add_scalar(f"{label}/FP", cm[0, 1], epoch)
-    writer.add_scalar(f"{label}/FN", cm[1, 0], epoch)
+    writer.add_scalar(f"{label}_sin/Precision", precision_sinergy, epoch)
+    writer.add_scalar(f"{label}_sin/Recall", recall_synergy, epoch)
+    writer.add_scalar(f"{label}_sin/F1", f1_synergy, epoch)
+    writer.add_scalar(f"{label}_cmSin/TP", cm_synergy[1, 1], epoch)
+    writer.add_scalar(f"{label}_cmSin/TN", cm_synergy[0, 0], epoch)
+    writer.add_scalar(f"{label}_cmSin/FP", cm_synergy[0, 1], epoch)
+    writer.add_scalar(f"{label}_cmSin/FN", cm_synergy[1, 0], epoch)
 
-    return avg_loss, precision, recall, f1, cm
+    return avg_loss, precision_sinergy, recall_synergy, f1_synergy, cm_synergy
 
 
 def split_indices(real_indices, fake_indices, splits, log_splits=False):
@@ -522,9 +589,8 @@ def create_dataloaders(config, tokenizer, index_splits):
             max_length=config["max_length_bert_tokenizer"],
             tags_len=config.get("tag_output_dim", None),
             subset_indices=indices,
+            dataset_name=split_name,
         )
-        print(f"----- Creating DataLoader for {split_name} ----")
-        dataset.print_synergy()
 
         is_train = split_name == "train"
         dataloaders[split_name] = DataLoader(
@@ -633,19 +699,47 @@ def train_joint_model(config):
 
     print(f"Using synergy model architecture: {config['synergy_arch']}")
 
+    train_dataset = train_loader.dataset
+    
+    if config.get("synergy_pos_weight", None) is not None:
+        synergy_model_pos_weight = torch.tensor(
+            [config["synergy_pos_weight"]]
+        ).to(device)
+    else:
+        synergy_1_counts = train_dataset.counts[0]+ train_dataset.counts[2]
+        synergy_0_counts = train_dataset.counts[1] + train_dataset.counts[3]
+
+        synergy_model_pos_weight = torch.tensor(
+            [synergy_0_counts / synergy_1_counts]
+        ).to(device)
+
     tag_model = None
+    tag_model_pos_weight = None
     if config.get("use_tag_model", None):
 
         tag_model = TagModel(
             input_dim=config["embedding_dim"],
-            hidden_dim=config.get("tag_hidden_dim", 512),
+            hidden_dims=config.get("tag_hidden_dims", [512,256]),
             output_dim=config.get("tag_output_dim", 271),
-            dropout=config.get("tag_dropout", 0.2)
+            dropout=config.get("tag_dropout", 0.2),
+            use_batchnorm=True,
+            use_sigmoid_output=False
         ).to(device)
+
+        
+        tag_counts = train_dataset.tag_counts
+        total = train_dataset.total_tag_samples
+
+        # Compute pos_weight for each tag
+        neg_counts = total - tag_counts
+        tag_model_pos_weight = neg_counts / (tag_counts + 1e-6)
+
+
         print(f"Using tag model with output dimension: {config.get('tag_output_dim', 271)}")
 
-    optimizer, loss_fn, loss_tag_fn = build_training_components(
-        config, bert_model, synergy_model, device, tag_model=tag_model
+
+    optimizer, loss_sin_fn, loss_tag_fn = build_training_components(
+        config, bert_model, synergy_model, device, tag_model=tag_model, tag_model_pos_weight=tag_model_pos_weight
     )
 
     
@@ -662,12 +756,12 @@ def train_joint_model(config):
             tag_model,
             train_loader,
             optimizer,
-            loss_fn,
+            loss_sin_fn,
             loss_tag_fn,
             epoch,
             writer,
             device,
-            tag_loss_weight=config.get("tag_loss_weight", 0.5),
+            tag_loss_weight=config.get("tag_loss_weight", 1.0),
             accumulation_steps=config["accumulation_steps"],
             use_empty_cache=config.get("use_empty_cache", False),
         )
@@ -678,7 +772,7 @@ def train_joint_model(config):
                         bert_model,
                         synergy_model,
                         loader,
-                        loss_fn,
+                        loss_sin_fn,
                         epoch,
                         writer,
                         device,
@@ -686,7 +780,7 @@ def train_joint_model(config):
                         false_positive_penalty=config.get("false_positive_penalty", 1.0),
                         tag_model=tag_model,
                         loss_tag_model=loss_tag_fn,
-                        tag_loss_weight=config.get("tag_loss_weight", 0.5),
+                        tag_loss_weight=config.get("tag_loss_weight", 1.0),
                     )
 
         if (epoch + 1) % config["save_every"] == 0:
@@ -696,6 +790,13 @@ def train_joint_model(config):
             synergy_model_path = os.path.join(
                 save_full_dir, f"synergy_model_epoch_{epoch + 1}.pth"
             )
+            if tag_model is not None:
+                tag_model_path = os.path.join(
+                    save_full_dir, f"tag_model_epoch_{epoch + 1}.pth"
+                )
+                torch.save(tag_model.state_dict(), tag_model_path)
+                print(f"Saved tag model at epoch {epoch + 1}")
+            
             torch.save(bert_model.state_dict(), bert_model_path)
             torch.save(synergy_model.state_dict(), synergy_model_path)
             print(f"Saved models at epoch {epoch + 1}")

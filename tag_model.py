@@ -3,24 +3,44 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class TagModel(nn.Module):
-    def __init__(self, input_dim=384, hidden_dim=512, output_dim=271, dropout=0.2):
+    def __init__(
+        self,
+        input_dim=384,
+        hidden_dims=[512, 256],
+        output_dim=271,
+        dropout=0.3,
+        use_batchnorm=True,
+        use_sigmoid_output=False
+    ):
         """
-        input_dim: dimension of BERT embeddings (usually 768 or 1024)
-        hidden_dim: size of intermediate layer
-        output_dim: number of tags (e.g., 271 for top-40-min-count tags)
-        dropout: dropout rate between layers
+        Improved tag prediction model with better regularization and flexibility.
+        
+        Args:
+            input_dim: Input embedding size (e.g. from BERT)
+            hidden_dims: Tuple of hidden layer sizes
+            output_dim: Number of tag classes
+            dropout: Dropout rate
+            use_batchnorm: Whether to apply batch norm
+            use_sigmoid_output: Whether to apply sigmoid in the output layer (for inference)
         """
-        super(TagModel, self).__init__()
-        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        super().__init__()
+
+        self.use_sigmoid_output = use_sigmoid_output
+        self.use_batchnorm = use_batchnorm
+
+        self.fc1 = nn.Linear(input_dim, hidden_dims[0])
+        self.bn1 = nn.BatchNorm1d(hidden_dims[0]) if use_batchnorm else nn.Identity()
+        self.fc2 = nn.Linear(hidden_dims[0], hidden_dims[1])
+        self.bn2 = nn.BatchNorm1d(hidden_dims[1]) if use_batchnorm else nn.Identity()
         self.dropout = nn.Dropout(dropout)
-        self.fc2 = nn.Linear(hidden_dim, output_dim)
+        self.output = nn.Linear(hidden_dims[1], output_dim)
 
     def forward(self, x):
-        """
-        x: tensor of shape (batch_size, input_dim)
-        returns: logits of shape (batch_size, output_dim)
-        """
-        x = F.relu(self.fc1(x))
+        x = F.leaky_relu(self.bn1(self.fc1(x)))
         x = self.dropout(x)
-        x = self.fc2(x)  # No sigmoid here, handled by BCEWithLogitsLoss
+        x = F.leaky_relu(self.bn2(self.fc2(x)))
+        x = self.dropout(x)
+        x = self.output(x)
+        if self.use_sigmoid_output:
+            return torch.sigmoid(x)
         return x

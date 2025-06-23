@@ -164,19 +164,20 @@ def calculate_weighted_loss(logits, labels, loss_fn, false_positive_penalty=1.0)
     weights = torch.ones_like(labels)
     false_positive_mask = (labels == 0) & (preds == 1)
     weights[false_positive_mask] = false_positive_penalty
-
-    #calculate TP, TN, FP, FN as a dictionary
-    confusion_matrix = {}
-    true_positive_mask = (labels == 1) & (preds == 1)
-    true_negative_mask = (labels == 0) & (preds == 0)
-    false_negative_mask = (labels == 1) & (preds == 0)
-    false_positive_mask = (labels == 0) & (preds == 1)
-    confusion_matrix['TP'] = true_positive_mask.sum().item()
-    confusion_matrix['TN'] = true_negative_mask.sum().item()    
-    confusion_matrix['FP'] = false_positive_mask.sum().item()
-    confusion_matrix['FN'] = false_negative_mask.sum().item()
-
     weighted_loss = (loss * weights).mean()
+
+    # #calculate TP, TN, FP, FN as a dictionary
+    confusion_matrix = {}
+    # true_positive_mask = (labels == 1) & (preds == 1)
+    # true_negative_mask = (labels == 0) & (preds == 0)
+    # false_negative_mask = (labels == 1) & (preds == 0)
+    # false_positive_mask = (labels == 0) & (preds == 1)
+    # confusion_matrix['TP'] = true_positive_mask.sum().item()
+    # confusion_matrix['TN'] = true_negative_mask.sum().item()    
+    # confusion_matrix['FP'] = false_positive_mask.sum().item()
+    # confusion_matrix['FN'] = false_negative_mask.sum().item()
+
+    
     return weighted_loss, preds, confusion_matrix
 
 
