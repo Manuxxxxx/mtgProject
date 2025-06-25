@@ -20,6 +20,37 @@ from synergy_model import build_synergy_model, calculate_weighted_loss
 
 import bert_parsing
 
+def calculate_stats_lenght_tokenizer(tokenizer, cards, max_length=450):
+    """
+    Calculate the average and max length of tokenized cards using the provided tokenizer.
+    Plots all the lengths in a graph.
+    
+    Args:
+        tokenizer: The tokenizer to use for tokenization.
+        cards (list): List of card dictionaries to tokenize.
+        max_length (int): Maximum length for tokenization.
+        
+    Returns:
+        None: This function does not return anything, but it will plot a histogram of token lengths.
+    """
+    #plot histogram of lengths and save it
+    import matplotlib.pyplot as plt
+
+    tokenized_lengths = [len(tokenizer(bert_parsing.format_card_for_bert(card), truncation=True, max_length=max_length)["input_ids"]) for card in cards]
+    avg_length = np.mean(tokenized_lengths)
+    max_length = np.max(tokenized_lengths)
+    min_length = np.min(tokenized_lengths)
+    plt.hist(tokenized_lengths, bins=50, alpha=0.75)
+    plt.title("Tokenized Lengths Histogram")
+    plt.xlabel("Length")
+    plt.ylabel("Frequency")
+    plt.axvline(avg_length, color='r', linestyle='dashed', linewidth=1, label=f'Avg Length: {avg_length:.2f}')
+    plt.axvline(max_length, color='g', linestyle='dashed', linewidth=1, label=f'Max Length: {max_length}')
+    plt.axvline(min_length, color='b', linestyle='dashed', linewidth=1, label=f'Min Length: {min_length}')
+    plt.grid(True)
+    plt.savefig("tokenized_lengths_histogram.png")
+    plt.close()
+
 
 def set_seed(seed: int = 42):
     random.seed(seed)  # Python random module
@@ -473,7 +504,6 @@ def eval_loop(
             embed1 = bert_model(input_ids1, attention_mask1)
             embed2 = bert_model(input_ids2, attention_mask2)
 
-            tag_loss = 0.0
             if tag_model is not None and tag_hot1 is not None:
                 tags_pred1 = tag_model(embed1)
                 tags_pred2 = tag_model(embed2)
@@ -494,7 +524,8 @@ def eval_loop(
             )
 
             total_synergy_loss += weighted_loss_synergy.item()
-            total_tag_loss += tag_loss.item() * tag_loss_weight
+            if tag_model is not None:
+                total_tag_loss += tag_loss.item() * tag_loss_weight
             all_preds_sinergy.extend(preds_synergy.cpu().numpy())
             all_labels_sinergy.extend(labels_synergy.cpu().numpy().astype(int))
             if tag_model is not None:
@@ -694,6 +725,10 @@ def train_multitask_model(config):
     model_name = config["bert_model_name"]
     embedding_dim = config.get("embedding_dim", 384)
     bert_model, tokenizer, device = build_bert_model(model_name, embedding_dim)
+
+    # calculate_stats_lenght_tokenizer(
+    #     tokenizer, json.load(open(config["bulk_file"], "r")), max_length=500
+    # )
 
     print_separator()
     data_loaders = create_dataloaders(config, tokenizer, split_indices_result)

@@ -112,6 +112,7 @@ if __name__ == "__main__":
     print(f"Total cards after set filter: {len(card_data)}")
     card_data = add_tags_to_all_cards(card_data, tag_data, tags_to_include)
     # Save the updated card data to a new JSON file
+    os.makedirs(conf.processed_tag_dir, exist_ok=True)
     output_file = os.path.join(conf.processed_tag_dir, f"cards_with_tags_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
     with open(output_file, 'w') as f:
         json.dump(card_data, f, indent=2)
