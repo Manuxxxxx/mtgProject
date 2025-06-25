@@ -7,7 +7,7 @@ from tqdm import tqdm
 from transformers import BertTokenizer, BertModel
 import bert_parsing
 import conf
-from bert_emb_tags import BertEmbedRegressor, initialize_bert_model
+from bert_model import BertEmbedRegressor, build_bert_model
 
 
 MODEL_NAME = "distilbert-base-uncased"
@@ -55,7 +55,7 @@ def load_bulk_file(bulk_file):
     return data
 
 def create_embedding_file(bulk_file, save_every=2000):
-    model, tokenizer, device = initialize_bert_model(MODEL_NAME, EMBEDDING_DIM)
+    model, tokenizer, device = build_bert_model(MODEL_NAME, EMBEDDING_DIM)
     model.load_state_dict(torch.load(CHECKPOINT_FILE))
     model.eval()
 

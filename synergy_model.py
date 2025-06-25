@@ -72,7 +72,7 @@ def init_weights(m):
 # ----------------------
 # Model Factory
 # ----------------------
-def build_model(arch_name, embedding_dim):
+def build_synergy_model(arch_name, embedding_dim):
     if arch_name == "modelSimple":
         model = ModelSimple(embedding_dim)
     elif arch_name == "modelComplex":
@@ -168,14 +168,6 @@ def calculate_weighted_loss(logits, labels, loss_fn, false_positive_penalty=1.0)
 
     # #calculate TP, TN, FP, FN as a dictionary
     confusion_matrix = {}
-    # true_positive_mask = (labels == 1) & (preds == 1)
-    # true_negative_mask = (labels == 0) & (preds == 0)
-    # false_negative_mask = (labels == 1) & (preds == 0)
-    # false_positive_mask = (labels == 0) & (preds == 1)
-    # confusion_matrix['TP'] = true_positive_mask.sum().item()
-    # confusion_matrix['TN'] = true_negative_mask.sum().item()    
-    # confusion_matrix['FP'] = false_positive_mask.sum().item()
-    # confusion_matrix['FN'] = false_negative_mask.sum().item()
 
     
     return weighted_loss, preds, confusion_matrix
@@ -240,7 +232,7 @@ def initialize_run_dirs(config):
 
 
 def build_training_components(config, device):
-    model = build_model(config["modelArchitecture"], config["embedding_dim"]).to(device)
+    model = build_synergy_model(config["modelArchitecture"], config["embedding_dim"]).to(device)
     optimizer = build_optimizer(config["optimizer"], model.parameters(), config["learning_rate"], config["optimizer_config"])
     loss_fn = nn.BCEWithLogitsLoss(pos_weight=torch.tensor([config.get("BCEweight", 1.0)]).to(device))
     return model, optimizer, loss_fn

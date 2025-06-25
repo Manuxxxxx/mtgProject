@@ -245,7 +245,7 @@ def train_the_model():
 
     writer.close()
 
-def initialize_bert_model(model_name=None, embedding_dim=EMBEDDING_DIM):
+def build_bert_model(model_name=None, embedding_dim=EMBEDDING_DIM):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     tokenizer = None

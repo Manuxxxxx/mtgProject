@@ -7,25 +7,16 @@ import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
-from transformers import BertTokenizer, BertModel
-from transformers import AutoTokenizer, AutoModel
-from transformers import DistilBertModel, DistilBertTokenizer
 import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
-from torch.utils.data import Subset
 import time
 import sys
 from torch.amp import autocast, GradScaler
 import shutil
-from tag_model import TagModel, build_tag_model, init_tag_model_weights
 
-from synergy_model import (
-    build_model,
-    calculate_weighted_loss,
-    eval_loop,
-    build_optimizer,
-)
-from bert_emb_tags import BertEmbedRegressor, initialize_bert_model
+from tag_model import  build_tag_model
+from bert_model import build_bert_model
+from synergy_model import build_synergy_model, calculate_weighted_loss
 
 import bert_parsing
 
@@ -542,14 +533,13 @@ def eval_loop(
 
     writer.add_scalar(f"{label}/Loss", avg_loss, epoch)
     writer.add_scalar(f"{label}/Synergy Loss", avg_synergy_loss, epoch)
-    writer.add_scalar(f"{label}_sin/Precision", precision_sinergy, epoch)
-    writer.add_scalar(f"{label}_sin/Recall", recall_synergy, epoch)
-    writer.add_scalar(f"{label}_sin/F1", f1_synergy, epoch)
+    writer.add_scalar(f"{label}/Precision", precision_sinergy, epoch)
+    writer.add_scalar(f"{label}/Recall", recall_synergy, epoch)
+    writer.add_scalar(f"{label}/F1", f1_synergy, epoch)
     writer.add_scalar(f"{label}_cmSin/TP", cm_synergy[1, 1], epoch)
     writer.add_scalar(f"{label}_cmSin/TN", cm_synergy[0, 0], epoch)
     writer.add_scalar(f"{label}_cmSin/FP", cm_synergy[0, 1], epoch)
     writer.add_scalar(f"{label}_cmSin/FN", cm_synergy[1, 0], epoch)
-
 
 def split_indices(real_indices, fake_indices, splits, log_splits=False):
     random.shuffle(real_indices)
@@ -673,7 +663,7 @@ def setup_dirs_writer(config):
 def print_separator():
     print("=" * 30)
 
-def train_joint_model(config):
+def train_multitask_model(config):
     
     # Set up directories and writer
     writer, save_full_dir, start_epoch = setup_dirs_writer(config)
@@ -703,7 +693,7 @@ def train_joint_model(config):
     # Step 2: Initialize BERT model and tokenizer
     model_name = config["bert_model_name"]
     embedding_dim = config.get("embedding_dim", 384)
-    bert_model, tokenizer, device = initialize_bert_model(model_name, embedding_dim)
+    bert_model, tokenizer, device = build_bert_model(model_name, embedding_dim)
 
     print_separator()
     data_loaders = create_dataloaders(config, tokenizer, split_indices_result)
@@ -717,7 +707,7 @@ def train_joint_model(config):
         bert_model.load_state_dict(torch.load(config["bert_checkpoint"]))
         print(f"Loaded BERT checkpoint: {config['bert_checkpoint']}")
 
-    synergy_model = build_model(config["synergy_arch"], config["embedding_dim"]).to(
+    synergy_model = build_synergy_model(config["synergy_arch"], config["embedding_dim"]).to(
         device
     )
 
@@ -869,7 +859,7 @@ def run_all_configs(config_path):
 
     for config in config_list:
         config["run_name"] += time.strftime("_%Y%m%d_%H%M%S")  # Append timestamp here
-        train_joint_model(config)
+        train_multitask_model(config)
         print(f"Finished run\n\n")
 
 
