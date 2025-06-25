@@ -2,13 +2,15 @@ import re
 import torch
 import json
 from synergy_model import ModelComplex  # your binary model
+from tag_model import TagModel  # your tag model
 from tqdm import tqdm
 import random
 
 # Configuration
 EMBEDDING_DIM = 384
-CHECKPOINT_FILE = "checkpoints/joint_training/complex_noTrainBertMini_AdamW_20250613_134003/synergy_model_epoch_5.pth"
-BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint/commander_legal_cards20250609112722.json"
+TAG_CHECKPOINT_FILE = "checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/tag_model_epoch_9.pth"
+SYNERGY_CHECKPOINT_FILE = "checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/synergy_model_epoch_9.pth"
+BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250622170831_withuri.json"
 TOP_N = 30  # how many cards to recommend
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -119,18 +121,47 @@ def decklist_to_array(decklist):
 
     return card_names
 
+# def print_tags_from_tag_model(tag_model, card_name, all_cards, all_embeddings):
+#     """
+#     Print tags for a given card using the tag model.
+#     """
+#     if card_name not in all_embeddings:
+#         print(f"Card '{card_name}' not found in embeddings.")
+#         return
+
+#     emb = all_embeddings[card_name].unsqueeze(0).to(DEVICE)
+#     with torch.no_grad():
+
+
+
 
 if __name__ == "__main__":
-    deck = """1 Aetherflux Reservoir
-1 Authority of the Consuls
-1 Black Market Connections
-1 Blind Obedience
-1 Bloodchief Ascension
-1 Cleric Class
-1 Liesa, Shroud of Dusk
+    deck = """1 Abyssal Harvester
+1 Ad Nauseam
+1 Agadeem's Awakening
+1 Akroma's Will
+1 Ancient Brass Dragon
+1 Anguished Unmaking
+1 Animate Dead
+1 Arcane Signet
+1 Archfiend of Depravity
+1 Archfiend of Despair
+1 Arena of Glory
+1 Armageddon
+1 Aurelia, the Warleader
+1 Swords to Plowshares
+1 Talisman of Conviction
+1 Thrilling Discovery
+1 Unburial Rites
+1 Valgavoth, Terror Eater
+1 Victimize
+1 Vile Mutilator
+1 Vilis, Broker of Blood
+
+1 Kaalia of the Vast
 """
     current_deck = decklist_to_array(deck)
-    commander = "Liesa, Shroud of Dusk"
+    commander = "Kaalia of the Vast"
     #get 30 cards from the deck at random
     if len(current_deck) > 30:
         current_deck = random.sample(current_deck, 30)
@@ -141,12 +172,16 @@ if __name__ == "__main__":
     all_embeddings, all_cards = load_embeddings_cards(BULK_EMBEDDING_FILE)
 
     print(" Loading model...")
-    model = ModelComplex(EMBEDDING_DIM).to(DEVICE)
-    model.load_state_dict(torch.load(CHECKPOINT_FILE))
-    model.eval()
+    synergy_model = ModelComplex(EMBEDDING_DIM).to(DEVICE)
+    synergy_model.load_state_dict(torch.load(SYNERGY_CHECKPOINT_FILE))
+    synergy_model.eval()
+
+    #def __init__(self, input_dim=384, hidden_dim=512, output_dim=271, dropout=0.2):
+    tag_model = TagModel(input_dim=EMBEDDING_DIM, hidden_dim=512, output_dim=271, dropout=0.2).to(DEVICE)
+
 
     # print(" Recommending cards...")
-    # top_recommendations = recommend_cards(current_deck, all_embeddings, model)
+    # top_recommendations = recommend_cards(current_deck, all_embeddings, synergy_model)
 
     # print("\n Top Recommendations:")
     # for name, score in top_recommendations:
@@ -159,7 +194,7 @@ if __name__ == "__main__":
 
     print("\n Recommending cards with commander...")
     top_recommendations_commander = recommend_cards_commander(
-        current_deck, all_embeddings, all_cards, model, commander_name=commander
+        current_deck, all_embeddings, all_cards, synergy_model, commander_name=commander
     )
     print("\n Top Recommendations with Commander:")
     for name, score in top_recommendations_commander:

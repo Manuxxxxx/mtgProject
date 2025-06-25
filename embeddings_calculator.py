@@ -13,7 +13,7 @@ from bert_emb_tags import BertEmbedRegressor, initialize_bert_model
 MODEL_NAME = "distilbert-base-uncased"
 EMBEDDING_DIM = 384  # Should match the dimension of tag embeddings
 MAX_LEN = 256
-CHECKPOINT_FILE="checkpoints/joint_training/complex_noTrainBertMini_AdamW_20250613_134003/bert_model_epoch_5.pth"
+CHECKPOINT_FILE="checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/bert_model_epoch_9.pth"
 
 
 
@@ -54,7 +54,7 @@ def load_bulk_file(bulk_file):
         data = json.load(f)
     return data
 
-def create_embedding_file(bulk_file, save_every=500):
+def create_embedding_file(bulk_file, save_every=2000):
     model, tokenizer, device = initialize_bert_model(MODEL_NAME, EMBEDDING_DIM)
     model.load_state_dict(torch.load(CHECKPOINT_FILE))
     model.eval()
@@ -88,4 +88,4 @@ def create_embedding_file(bulk_file, save_every=500):
         f.write(compacted)
 
 if __name__ == "__main__":
-    create_embedding_file("datasets/processed/embedding_predicted/joint/commander_legal_cards20250609112722.json", save_every=300)
+    create_embedding_file("datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250622170831_withuri.json", save_every=10000)

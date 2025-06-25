@@ -71,24 +71,19 @@ class JointCardDataset(Dataset):
                 raise ValueError(
                     f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                 )
+            
             self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
             self.total_tag_samples = 0
 
             for synergy_pair in self.synergy_data:
-                card1 = self.find_card_by_name(synergy_pair["card1"]["name"])
-                card2 = self.find_card_by_name(synergy_pair["card2"]["name"])
+                for card_key in ["card1", "card2"]:
+                    card = self.find_card_by_name(synergy_pair[card_key]["name"])
+                    if card:
+                        tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
+                        if tag_vec.shape[0] == self.tags_len:
+                            self.tag_counts += tag_vec
+                            self.total_tag_samples += 1
 
-                if card1:
-                    vec1 = self.hot_encode_tags(card1)
-                    if vec1.shape[0] > 0:
-                        self.tag_counts += vec1
-                        self.total_tag_samples += 1
-
-                if card2:
-                    vec2 = self.hot_encode_tags(card2)
-                    if vec2.shape[0] > 0:
-                        self.tag_counts += vec2
-                        self.total_tag_samples += 1
 
         self.calculate_synergy_counts()
         if debug_dataset:
@@ -265,6 +260,8 @@ def build_training_components(config, bert_model, synergy_model, device, tag_mod
         loss_tag_fn = nn.BCEWithLogitsLoss(
             pos_weight=tag_model_pos_weight
         ).to(device)
+    else:
+        loss_tag_fn = None
 
     return optimizer, loss_fn, loss_tag_fn
 
@@ -754,12 +751,14 @@ def train_joint_model(config):
         ).to(device)
 
         
-        tag_counts = train_dataset.tag_counts
-        total = train_dataset.total_tag_samples
+        tag_counts = train_dataset.tag_counts  # shape: (tags_len,)
+        total = train_dataset.total_tag_samples  # scalar
 
-        # Compute pos_weight for each tag
-        neg_counts = total - tag_counts
-        tag_model_pos_weight = neg_counts / (tag_counts + 1e-6)
+        neg_counts = total - tag_counts  # how many times each tag is not present
+        tag_model_pos_weight = neg_counts / (tag_counts + 1e-6)  # avoid div-by-zero
+
+        print(f"Tag model pos weight: {tag_model_pos_weight[:10]}... (total {len(tag_model_pos_weight)})")
+
 
 
         print(f"Using tag model with output dimension: {config.get('tag_output_dim', 271)}")
