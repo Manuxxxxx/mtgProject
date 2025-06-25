@@ -359,7 +359,6 @@ def train_loop(
             embed1 = bert_model(input_ids1, attention_mask1)
             embed2 = bert_model(input_ids2, attention_mask2)
 
-            tag_loss = 0.0
             if tag_model is not None:
                 tags_pred1 = tag_model(embed1)
                 tags_pred2 = tag_model(embed2)
@@ -397,7 +396,9 @@ def train_loop(
                 torch.cuda.empty_cache()
 
         total_synergy_loss += weighted_loss_synergy.item()  # already scaled back for logging
-        total_tag_loss += tag_loss.item() * tag_loss_weight
+        if tag_model is not None:
+            # Scale tag loss back for logging
+            total_tag_loss += tag_loss.item() * tag_loss_weight
         
         if calc_metrics:
             
