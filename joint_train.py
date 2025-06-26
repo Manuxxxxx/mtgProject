@@ -14,6 +14,7 @@ import sys
 from torch.amp import autocast, GradScaler
 import shutil
 
+from focal_loss import FocalLoss
 from tag_model import  build_tag_model
 from bert_model import build_bert_model
 from synergy_model import build_synergy_model, calculate_weighted_loss
@@ -274,16 +275,36 @@ def build_training_components(config, bert_model, synergy_model, device, tag_mod
 
     )
 
+    #print optimizer parameters
+    print("Optimizer parameters:")
+    for param_group in optimizer.param_groups:
+        print(f"  - Learning rate: {param_group['lr']}, Params: {len(param_group['params'])}")
+
     loss_fn = nn.BCEWithLogitsLoss(
         pos_weight=synergy_model_pos_weight
     ).to(device)
 
-    if tag_model is not None and tag_model_pos_weight is not None:
-        loss_tag_fn = nn.BCEWithLogitsLoss(
-            pos_weight=tag_model_pos_weight
+    if config.get("use_focal", False):
+        # Use FocalLoss, normalize alpha if provided
+        if tag_model_pos_weight is not None:
+            alpha = tag_model_pos_weight / tag_model_pos_weight.max()  # Normalize to 0–1
+        else:
+            alpha = None
+
+        loss_tag_fn = FocalLoss(
+            alpha=alpha,
+            gamma=config.get("focal_gamma", 2.0)
         ).to(device)
+
+    elif tag_model is not None and tag_model_pos_weight is not None:
+        # Use weighted BCE
+        loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
+
     else:
+        # Fallback if no loss function can be constructed
         loss_tag_fn = None
+
+
 
     return optimizer, loss_fn, loss_tag_fn
 
@@ -363,7 +384,7 @@ def train_loop(
                 tags_pred1 = tag_model(embed1)
                 tags_pred2 = tag_model(embed2)
 
-            # If tag_model is not None, calculate tag loss
+                # If tag_model is not None, calculate tag loss
             
                 tag_loss1 = loss_tag_model(tags_pred1, tag_hot1)
                 tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
@@ -379,8 +400,11 @@ def train_loop(
                 logits_synergy, labels_synergy, loss_synergy_model, false_positive_penalty=false_positive_penalty
             )
 
-            # Combine losses
-            full_loss = weighted_loss_synergy + tag_loss_weight * tag_loss
+            if tag_model is not None:
+                # Combine losses
+                full_loss = weighted_loss_synergy + tag_loss_weight * tag_loss
+            else:
+                full_loss = weighted_loss_synergy
             # Normalize loss for gradient accumulation
             loss_scaled = full_loss / accumulation_steps
 
@@ -760,6 +784,7 @@ def train_multitask_model(config):
         synergy_0_counts = train_dataset.counts[1] + train_dataset.counts[3]
 
         synergy_model_pos_weight = torch.tensor([synergy_0_counts / (synergy_1_counts+ 1e-6)])
+        print(f"Using synergy model pos weight: {synergy_model_pos_weight.item()}")
 
 
     tag_model = None
@@ -783,10 +808,6 @@ def train_multitask_model(config):
         neg_counts = total - tag_counts  # how many times each tag is not present
         tag_model_pos_weight = neg_counts / (tag_counts + 1e-6)  # avoid div-by-zero
 
-        print(f"Tag model pos weight: {tag_model_pos_weight[:10]}... (total {len(tag_model_pos_weight)})")
-
-
-
         print(f"Using tag model with output dimension: {config.get('tag_output_dim', 271)}")
 
 
@@ -795,7 +816,7 @@ def train_multitask_model(config):
     )
 
     test_at_start_sets = config.get("test_at_start_sets", None)
-    if test_at_start_sets is not None:
+    if test_at_start_sets is not None and isinstance(test_at_start_sets, list) and len(test_at_start_sets) > 0:
         print_separator()
         print("Running initial evaluation on test sets...")
         for split_name, loader in data_loaders.items():
