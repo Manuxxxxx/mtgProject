@@ -132,7 +132,7 @@ def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
     csrf_token = None
     processed_count = 0
 
-    for set_code, cards_info in tqdm(unprocessed_cards.items(), desc="Processing sets", unit="card"):
+    for set_code, cards_info in tqdm(unprocessed_cards.items(), desc="Processing all sets", unit="set"):
         for collector_number in tqdm(cards_info["collector_number"], desc=f"Processing {set_code}", unit="card"):
             if csrf_token is None:
                 csrf_token, card_url = get_csrf_token(session, set_code, collector_number)
@@ -159,20 +159,25 @@ def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
             if processed_count % save_every == 0:
                 with open(storage_file, "w") as file:
                     json.dump(already_processed, file)
+                print(f"Saved progress after processing {processed_count} cards.")
 
     # Final save after processing all cards
     with open(storage_file, "w") as file:
-        json.dump(already_processed, file)
+        #indent at the end
+        json.dump(already_processed, file, indent=4)
+    print(f"Processed {processed_count} cards. Data saved to {storage_file}.")
 
 def get_unprocessed_cards(sets_to_process, already_processed):
     unprocessed = {}
 
     for set_code in sets_to_process:
         if set_code not in already_processed:
-            # If the set is not processed at all, add all its cards
-            unprocessed[set_code] = {
-                "collector_number": sets_to_process[set_code]["collector_number"].copy()
-            }
+            # If the set is not processed at all, add all its cards if there are cards to process
+            cards_to_process = sets_to_process[set_code]["collector_number"]
+            if len(cards_to_process) > 0:
+                unprocessed[set_code] = {"collector_number": cards_to_process}
+                
+                
         else:
             # Find cards in sets_to_process but not in already_processed
             cards_to_process = sets_to_process[set_code]["collector_number"]
@@ -181,7 +186,8 @@ def get_unprocessed_cards(sets_to_process, already_processed):
                 card for card in cards_to_process if card not in cards_processed
             ]
 
-            if unprocessed_cards:
+            if len(unprocessed_cards) > 0:
+                # Only add the set if there are unprocessed cards
                 unprocessed[set_code] = {"collector_number": unprocessed_cards}
 
     return unprocessed
@@ -217,4 +223,4 @@ if __name__ == "__main__":
     bulk_file = "datasets/processed/indent/commander_legal_cards20250625183217.json"
     storage_file = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
 
-    process_cards(sets_to_include, bulk_file, storage_file, save_every=10)
+    process_cards(sets_to_include, bulk_file, storage_file, save_every=400)
