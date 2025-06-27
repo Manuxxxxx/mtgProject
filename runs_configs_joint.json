@@ -4,6 +4,8 @@
 
       "train_tag_model": true,
 
+      "use_scheduler": true,
+
       "start_epoch": 0,
       "bert_checkpoint_multi": null,
       "bert_checkpoint_tag": null,
@@ -13,8 +15,13 @@
       "tag_projector_checkpoint": null,
       "run_name_previous": null,
 
+      "freeze_bert_epochs_tag": 6,
+      "freeze_bert_layers_tag": 3,
+      "freeze_bert_epochs_multi": 4,
+      "freeze_bert_layers_multi": 3,
+
       "bert_model_name": "distilbert-base-uncased",
-      "bert_learning_rate_multi": 2e-5,
+      "bert_learning_rate_multi": 1e-5,
       "bert_learning_rate_tag": 2e-5,
       
       "embedding_dim": 384,
@@ -23,13 +30,11 @@
       "synergy_arch": "modelComplex",
       "synergy_learning_rate": 1e-4,
 
-      "optimizer": "AdamW",
-      "optimizer_config": {
-        "weight_decay": 0.01
-      },
+      "optimizer": "Adam",
+      "optimizer_config": {},
 
-      "epochs_multi": 12,
-      "epochs_tag": 10,
+      "epochs_multi": 10,
+      "epochs_tag": 6,
 
       "batch_size": 5,
       "accumulation_steps": 4,
@@ -41,9 +46,9 @@
       "synergy_false_positive_penalty": 3.0,
 
       "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
-      "bulk_file": "datasets/processed/tag_included/cards_with_tags_20250625191404.json",
-      "log_dir": "runs/joint_training_tag_fixcard",
-      "save_dir": "checkpoints/joint_training_tag_fixcard",
+      "bulk_file": "datasets/processed/tag_included/cards_with_tags_130_20250626153433.json",
+      "log_dir": "runs/two_phase_joint",
+      "save_dir": "checkpoints/two_phase_joint",
 
       "splits_tag":{
         "train": 0.4,
@@ -55,13 +60,12 @@
         "val_real_fake": {"real": 0.1, "fake": 0.03}
       },
       
-
-      "tag_learning_rate_tag": 1e-4,
-      "tag_learning_rate_multi": 1e-4,
+      "tag_learning_rate_tag": 5e-4,
+      "tag_learning_rate_multi": 5e-5,
 
       "tag_hidden_dims": [512, 256],
-      "tag_output_dim": 271,
-      "tag_loss_weight": 1.0,
+      "tag_output_dim": 130,
+      "tag_loss_weight": 0.2,
       "tag_dropout": 0.3,
       "use_focal": true,
       "focal_gamma": 2.0,
@@ -73,10 +77,6 @@
       "train_calc_metrics": true,
       "test_at_start_sets": []
 
-      
-    
     }
-    
-    
   ]
     

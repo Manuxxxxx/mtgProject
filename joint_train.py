@@ -13,6 +13,7 @@ import time
 import sys
 from torch.amp import autocast, GradScaler
 import shutil
+from transformers import get_linear_schedule_with_warmup
 
 from focal_loss import FocalLoss
 from tag_model import  build_tag_model
@@ -642,6 +643,7 @@ def train_multitask_loop(
     accumulation_steps=1,
     use_empty_cache=False,
     calc_metrics=False,
+    scheduler=None,
 ):
     bert_model.train()
     synergy_model.train()
@@ -694,6 +696,8 @@ def train_multitask_loop(
     if (step + 1) % accumulation_steps != 0:
         scaler.step(optimizer)
         scaler.update()
+        if scheduler is not None:
+            scheduler.step()
         optimizer.zero_grad()
 
     avg_loss = (total_tag_loss + total_synergy_loss) / len(dataloader)
@@ -801,7 +805,7 @@ def split_indices(real_indices, fake_indices, splits, log_splits=False):
 
     return final_splits
 
-def create_dataloaders(config, tokenizer, index_splits):
+def create_dataloaders_multi(config, tokenizer, index_splits):
 
     # Create DataLoaders
     dataloaders = {}
@@ -886,19 +890,24 @@ def print_separator():
     print("=" * 30)
 
 def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokenizer, device, start_epoch):
-    
+
+    # --- Freeze BERT based on config ---
+    freeze_epochs = config.get("freeze_bert_epochs_tag", 0)
+    freeze_layers = config.get("freeze_bert_layers_tag", None)
+
+    if freeze_layers == "all":
+        print(f"Freezing all BERT layers for tag model training, for {freeze_epochs} epochs.")
+        bert_model.freeze_bert()
+    elif isinstance(freeze_layers, int):
+        print(f"Freezing the first {freeze_layers} BERT layers for tag model training, for {freeze_epochs} epochs.")
+        bert_model.freeze_bert_layers(freeze_layers)
+
     with open(config["bulk_file"], "r") as f:
         bulk_data = json.load(f)
 
-    if config.get("splits_tag", None) is not None:
-        splits = config["splits_tag"]
-    else:
-        print("Using default splits for tags")
-        splits = {
-            "train": 0.4,
-            "val": 0.1,
-        }
-    
+    splits = config.get("splits_tag", {"train": 0.4, "val": 0.1})
+    print("Using splits:", splits)
+
     random.shuffle(bulk_data)
     train_data = bulk_data[:int(len(bulk_data) * splits["train"])]
     val_data = bulk_data[int(len(bulk_data) * splits["train"]):int(len(bulk_data) * (splits["train"] + splits["val"]))]
@@ -939,7 +948,6 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
     )
 
     print(f"Using tag model with output dimension: {config.get('tag_output_dim', 271)}")
-
     print_separator()
 
     optimizer, loss_tag_fn = build_training_components_tag(
@@ -947,14 +955,19 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
     )
 
     print_separator()
+    print(f"Starting training for tag model for {config['epochs_tag']} epochs...\n")
 
-    print(f"Starting training for tag {config['epochs_tag']} epochs...\n")
     for epoch in tqdm(
         range(start_epoch, config["epochs_tag"]),
         desc="Epochs Tag",
         initial=start_epoch,
     ):
         print_separator()
+        # Unfreeze BERT when freeze period is over
+        if freeze_epochs and epoch-start_epoch == freeze_epochs:
+            print(f"Unfreezing BERT at epoch {epoch}")
+            bert_model.unfreeze_bert()
+
         train_tag_loop(
             bert_model,
             tag_model,
@@ -986,7 +999,6 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
                 device
             )
         
-    
     print_separator()
     print("Training completed for tag model.")
     print("Saving final models...")
@@ -1056,12 +1068,22 @@ def run_training_multitask(config):
         config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model
     )
 
-
-
 def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model):
     
     # Step 1: Load and split indices
     real_indices, fake_indices = get_real_fake_indices(config["synergy_file"])
+
+    # --- Freeze BERT based on config ---
+    freeze_epochs = config.get("freeze_bert_epochs_multi", 0)
+    freeze_layers = config.get("freeze_bert_layers_multi", None)
+
+    if freeze_layers == "all":
+        print(f"Freezing all BERT layers for tag model training, for {freeze_epochs} epochs.")
+        bert_model.freeze_bert()
+    elif isinstance(freeze_layers, int):
+        print(f"Freezing the first {freeze_layers} BERT layers for tag model training, for {freeze_epochs} epochs.")
+        bert_model.freeze_bert_layers(freeze_layers)
+
 
     # Define split proportions
     if config.get("splits", None) is not None:
@@ -1080,7 +1102,7 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
 
     print_separator()
 
-    data_loaders = create_dataloaders(config, tokenizer, split_indices_result)
+    data_loaders = create_dataloaders_multi(config, tokenizer, split_indices_result)
 
     train_loader = data_loaders["train"]
 
@@ -1142,6 +1164,20 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
         synergy_model_pos_weight=synergy_model_pos_weight
     )
 
+    if config.get("use_scheduler", False):
+        num_training_steps = len(train_loader) * (config["epochs_multi"] - start_epoch)
+        num_warmup_steps = int(0.1 * num_training_steps)
+
+        scheduler = get_linear_schedule_with_warmup(
+            optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
+        )
+        print(f"Using scheduler with {num_warmup_steps} warmup steps and {num_training_steps} total steps.")
+    else:
+        scheduler = None
+        print("Not using scheduler.")
+
+    print_separator()
+
     test_at_start_sets = config.get("test_at_start_sets", None)
     if test_at_start_sets is not None and isinstance(test_at_start_sets, list) and len(test_at_start_sets) > 0:
         print_separator()
@@ -1172,6 +1208,11 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
         initial=start_epoch
     ):
         print_separator()
+
+        if freeze_epochs and epoch-start_epoch == freeze_epochs:
+            print(f"Unfreezing BERT at epoch {epoch}")
+            bert_model.unfreeze_bert()
+
         train_multitask_loop(
             bert_model,
             synergy_model,
@@ -1183,12 +1224,13 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
             epoch,
             writer,
             device,
-            tag_loss_weight=config.get("tag_loss_weight", 1.0),
+            tag_loss_weight=config.get("tag_loss_weight"),
             accumulation_steps=config["accumulation_steps"],
             use_empty_cache=config.get("use_empty_cache", False),
             calc_metrics=config.get("train_calc_metrics", False),
             tag_projector_model=tag_projector_model,
             false_positive_penalty=config.get("synergy_false_positive_penalty", 1.0),
+            scheduler=scheduler
         )
         
         if (epoch + 1) % config["save_every"] == 0:
