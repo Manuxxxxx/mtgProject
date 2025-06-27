@@ -15,16 +15,7 @@ def get_card_name_from_set_number(set_code, collector_number, data):
 
 def get_tags_from_set_number(set_code, collector_number, tag_data):
     #get all the tags for a specific set code and collector number
-    tags = []
-    for set_code_key, data in tag_data.items():
-        if set_code_key == set_code:
-            for key, value in data.items():
-                if key == "collector_number":
-                    continue
-                for tag_entry in value:
-                    if tag_entry.get("collector_number") == collector_number:
-                        tags.append(tag_entry["tag"])    
-    return tags
+    return tag_data[set_code][collector_number]
 
 def get_all_card_without_duplicate(input_file_processed_json):
     with open(input_file_processed_json, 'r') as file:
@@ -77,16 +68,47 @@ def extract_all_tags(tag_data):
 
     return list(unique_tags)
 
+def load_tag_data(input_file_tagger):
+    # Load the tag data from the JSON file
+    with open(input_file_tagger, 'r') as file:
+        tag_data = json.load(file)
+
+    smaller_tag_data = {}
+    
+    for set_code, data in tag_data.items():
+        for key, value in data.items():
+            if key == "collector_number":
+                continue
+            card_tags = []
+            for tag_entry in value["functional_tags"]:
+                tag_name = tag_entry["name"]
+                # Add the tag to the card_tags list
+                card_tags.append(tag_name)
+                #if the tag has a field ancestor append each ancestor to the tags
+                if 'ancestor' in tag_entry:
+                    ancestors = tag_entry['ancestor']
+                    if isinstance(ancestors, list):
+                        for ancestor in ancestors:
+                            if isinstance(ancestor, str):
+                                card_tags.append(ancestor)
+
+            # Add the card_tags to the smaller_tag_data
+            if set_code not in smaller_tag_data:
+                smaller_tag_data[set_code] = {}
+
+            smaller_tag_data[set_code][key] = card_tags
+    return smaller_tag_data
+                        
+                            
+
 
 def extract_all_tags_with_min_freq(tag_data, min_count=20):
     tag_counter = Counter()
 
     for set_code, data in tag_data.items():
         for key, value in data.items():
-            if key == "collector_number":
-                continue
             for tag_entry in value:
-                tag_counter[tag_entry["tag"]] += 1
+                tag_counter[tag_entry] += 1
 
     return {tag for tag, count in tag_counter.items() if count >= min_count}
 
@@ -99,12 +121,13 @@ def filter_cards_by_sets(card_data, sets_to_include):
 
 
 if __name__ == "__main__":
-    input_file_tagger = conf.scrapped_store
-    tag_data = json.load(open(input_file_tagger, 'r'))
+    input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
+    tag_data = load_tag_data(input_file_tagger)
 
-    tags_to_include = include_tags=extract_all_tags_with_min_freq(tag_data, min_count=80)
+    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=100)
 
     print(tags_to_include)
+    print(f"Total tags to include: {len(tags_to_include)}")
 
     input_file_processed_json = conf.processed_json
 

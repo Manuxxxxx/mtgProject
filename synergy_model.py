@@ -33,9 +33,9 @@ class ModelSimple(nn.Module):
 
 
 class ModelComplex(nn.Module):
-    def __init__(self, embedding_dim):
+    def __init__(self, embedding_dim, tag_projector_dim):
         super().__init__()
-        input_dim = 4 * embedding_dim
+        input_dim = 4 * embedding_dim + 4 * tag_projector_dim  # embed1, embed2, embed1*embed2, abs(embed1-embed2), tag_projector1, tag_projector2, tag_projector1*tag_projector2, abs(tag_projector1-tag_projector2)
         self.net = nn.Sequential(
             nn.Linear(input_dim, 256),
             nn.BatchNorm1d(256),
@@ -51,8 +51,8 @@ class ModelComplex(nn.Module):
             # Removed Sigmoid here too
         )
 
-    def forward(self, embed1, embed2):
-        x = torch.cat([embed1, embed2, embed1 * embed2, torch.abs(embed1 - embed2)], dim=-1)
+    def forward(self, embed1, embed2, tag_projector1, tag_projector2):
+        x = torch.cat([embed1, embed2, embed1 * embed2, torch.abs(embed1 - embed2), tag_projector1, tag_projector2, tag_projector1 * tag_projector2, torch.abs(tag_projector1 - tag_projector2)], dim=-1)
         return self.net(x)
 
 
@@ -161,9 +161,7 @@ def calculate_weighted_loss(logits, labels, loss_fn, false_positive_penalty=1.0)
     # print(f"Predictions: {preds.cpu().numpy()}, Labels: {labels.cpu().numpy()}")
     # print("Logits:", logits[:10].detach().cpu().numpy())
 
-    weights = torch.ones_like(labels)
-    false_positive_mask = (labels == 0) & (preds == 1)
-    weights[false_positive_mask] = false_positive_penalty
+    weights = torch.where(labels == 0, false_positive_penalty, 1.0)    
     weighted_loss = (loss * weights).mean()
 
     # #calculate TP, TN, FP, FN as a dictionary
