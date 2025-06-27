@@ -124,9 +124,9 @@ if __name__ == "__main__":
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     tag_data = load_tag_data(input_file_tagger)
 
-    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=100)
-
-    print(tags_to_include)
+    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=120)
+    tag_to_index = {tag: idx for idx, tag in enumerate(tags_to_include)}
+    print(tag_to_index)
     print(f"Total tags to include: {len(tags_to_include)}")
 
     input_file_processed_json = conf.processed_json
@@ -136,9 +136,13 @@ if __name__ == "__main__":
     card_data = add_tags_to_all_cards(card_data, tag_data, tags_to_include)
     # Save the updated card data to a new JSON file
     os.makedirs(conf.processed_tag_dir, exist_ok=True)
-    output_file = os.path.join(conf.processed_tag_dir, f"cards_with_tags_{len(tags_to_include)}_{datetime.now().strftime('%Y%m%d%H%M%S')}.json")
+    time = datetime.now().strftime('%Y%m%d%H%M%S')
+    output_file = os.path.join(conf.processed_tag_dir, f"cards_with_tags_{len(tags_to_include)}_{time}.json")
+    output_file_tag_to_index = os.path.join(conf.processed_tag_dir, f"tag_to_index_{len(tags_to_include)}_{time}.json")
     with open(output_file, 'w') as f:
         json.dump(card_data, f, indent=2)
+    with open(output_file_tag_to_index, 'w') as f:
+        json.dump(tag_to_index, f, indent=2)
     
 
     # all_tags = extract_all_tags(tag_data)

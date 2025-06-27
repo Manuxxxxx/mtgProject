@@ -15,10 +15,10 @@
       "tag_projector_checkpoint": null,
       "run_name_previous": null,
 
-      "freeze_bert_epochs_tag": 4,
-      "freeze_bert_layers_tag": 3,
-      "freeze_bert_epochs_multi": 6,
-      "freeze_bert_layers_multi": 3,
+      "freeze_bert_epochs_tag": 1,
+      "freeze_bert_layers_tag": 4,
+      "freeze_bert_epochs_multi": 1,
+      "freeze_bert_layers_multi": 4,
 
       "bert_model_name": "distilbert-base-uncased",
       "bert_learning_rate_multi": 1e-5,
@@ -33,8 +33,8 @@
       "optimizer": "Adam",
       "optimizer_config": {},
 
-      "epochs_multi": 10,
-      "epochs_tag": 6,
+      "epochs_multi": 1,
+      "epochs_tag": 0,
 
       "batch_size": 5,
       "accumulation_steps": 4,
@@ -48,17 +48,16 @@
       "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
       "bulk_file": "datasets/processed/tag_included/cards_with_tags_103_20250627182008.json",
       "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_103_20250627182008.json",
-      "log_dir": "runs/two_phase_joint",
-      "save_dir": "checkpoints/two_phase_joint",
+      "log_dir": "runs/two_phase_joint_test",
+      "save_dir": "checkpoints/two_phase_joint_test",
 
       "splits_tag":{
-        "train": 0.4,
-        "val": 0.1
+        "train": 0.05,
+        "val": 0.02
       },
       "splits" : {
-        "train": {"real": 0.5, "fake": 0.15},
-        "val_real": {"real": 0.1, "fake": 0.0},
-        "val_real_fake": {"real": 0.1, "fake": 0.03}
+        "train": {"real": 0.05, "fake": 0.01},
+        "val_real_fake": {"real": 0.01, "fake": 0.003}
       },
       
       "tag_learning_rate_tag": 5e-4,
@@ -76,6 +75,7 @@
       "tag_projector_hidden_dim": 256,
       "tag_projector_dropout": 0.3,
       "tag_projector_learning_rate": 5e-4,
+
       "train_calc_metrics": true,
       "test_at_start_sets": []
 

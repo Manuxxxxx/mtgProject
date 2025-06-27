@@ -72,11 +72,11 @@ def init_weights(m):
 # ----------------------
 # Model Factory
 # ----------------------
-def build_synergy_model(arch_name, embedding_dim):
+def build_synergy_model(arch_name, embedding_dim, tag_projector_dim):
     if arch_name == "modelSimple":
         model = ModelSimple(embedding_dim)
     elif arch_name == "modelComplex":
-        model = ModelComplex(embedding_dim)
+        model = ModelComplex(embedding_dim, tag_projector_dim)
     else:
         raise ValueError(f"Unknown model architecture: {arch_name}")
     model.apply(init_weights)
