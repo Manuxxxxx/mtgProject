@@ -625,34 +625,28 @@ def log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_los
 
 def log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, label_prefix="Train"):
     writer.add_scalar(f"{label_prefix}/Tag Loss", avg_loss, epoch)
-    print(f"shape of all_preds_tag: {np.array(all_preds_tag).shape}")
-    print(f"shape of all_labels_tag: {np.array(all_labels_tag).shape}")
-    
     binary_preds_tag = np.array(all_preds_tag) > 0.5
 
-    # Convert to integers (True → 1, False → 0)
-    binary_preds_tag_int = binary_preds_tag.astype(int)
-
-    # Total number of 1s
-    total_ones = np.sum(binary_preds_tag_int)
-    total_ones_labels = np.sum(np.array(all_labels_tag))
-
-    # Total number of predictions (575 * 103)
-    total_preds = binary_preds_tag_int.size
-
-    # Total number of 0s
-    total_zeros = total_preds - total_ones
-    total_zeros_labels = len(all_labels_tag) * binary_preds_tag_int.shape[1] - total_ones_labels
-
-    # Average number of 1s per prediction (per row)
-    avg_ones_per_prediction = np.mean(np.sum(binary_preds_tag_int, axis=1))
-    avg_ones_per_labels = np.mean(np.sum(np.array(all_labels_tag), axis=1))
-
-    # Output results
-    print(f"Total 1s: {total_ones}, Total 0s: {total_zeros}")
-    print(f"Total 1s in labels: {total_ones_labels}, Total 0s in labels: {total_zeros_labels}")
-    print(f"Average 1s per prediction: {avg_ones_per_prediction:.2f}")
-    print(f"Average 1s per labels: {avg_ones_per_labels:.2f}")
+    # print(f"shape of all_preds_tag: {np.array(all_preds_tag).shape}")
+    # print(f"shape of all_labels_tag: {np.array(all_labels_tag).shape}")
+    # # Convert to integers (True → 1, False → 0)
+    # binary_preds_tag_int = binary_preds_tag.astype(int)
+    # # Total number of 1s
+    # total_ones = np.sum(binary_preds_tag_int)
+    # total_ones_labels = np.sum(np.array(all_labels_tag))
+    # # Total number of predictions (575 * 103)
+    # total_preds = binary_preds_tag_int.size
+    # # Total number of 0s
+    # total_zeros = total_preds - total_ones
+    # total_zeros_labels = len(all_labels_tag) * binary_preds_tag_int.shape[1] - total_ones_labels
+    # # Average number of 1s per prediction (per row)
+    # avg_ones_per_prediction = np.mean(np.sum(binary_preds_tag_int, axis=1))
+    # avg_ones_per_labels = np.mean(np.sum(np.array(all_labels_tag), axis=1))
+    # # Output results
+    # print(f"Total 1s: {total_ones}, Total 0s: {total_zeros}")
+    # print(f"Total 1s in labels: {total_ones_labels}, Total 0s in labels: {total_zeros_labels}")
+    # print(f"Average 1s per prediction: {avg_ones_per_prediction:.2f}")
+    # print(f"Average 1s per labels: {avg_ones_per_labels:.2f}")
     
     precision_tag = precision_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
     recall_tag = recall_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
@@ -1225,7 +1219,7 @@ def run_training_multitask(config):
         print(f"Loaded tag model checkpoint: {config['tag_checkpoint_multi']}")
     
     train_multitask_model(
-        config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model
+        config, writer, save_full_dir, start_epoch+config.get("epochs_tag", 0), bert_model, tokenizer, device, tag_model
     )
 
 def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model):
@@ -1372,7 +1366,7 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
     print_separator()
     print(f"Starting training for {config['epochs_multi']} epochs...\n")
     for epoch in tqdm(
-        range(start_epoch, config["epochs_multi"]),
+        range(start_epoch, config["epochs_multi"]+config.get("epochs_tag", 0)),
         desc="Epochs",
         initial=start_epoch
     ):
