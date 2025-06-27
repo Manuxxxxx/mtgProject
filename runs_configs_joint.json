@@ -24,7 +24,7 @@
       "bert_learning_rate_multi": 1e-5,
       "bert_learning_rate_tag": 2e-5,
       
-      "embedding_dim": 384,
+      "bert_embedding_dim": 384,
       "max_length_bert_tokenizer": 280,
 
       "synergy_arch": "modelComplex",
@@ -69,6 +69,7 @@
       "tag_dropout": 0.3,
       "use_focal": true,
       "focal_gamma": 2.0,
+      "tag_use_sigmoid_output": false,
 
       "tag_projector_output_dim": 128,
       "tag_projector_hidden_dim": 256,

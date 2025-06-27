@@ -5,9 +5,9 @@ import torch.nn.functional as F
 class TagModel(nn.Module):
     def __init__(
         self,
-        input_dim=384,
-        hidden_dims=[512, 256],
-        output_dim=271,
+        input_dim,
+        hidden_dims,
+        output_dim,
         dropout=0.3,
         use_batchnorm=True,
         use_sigmoid_output=False

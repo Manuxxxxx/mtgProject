@@ -68,11 +68,11 @@ def set_seed(seed: int = 42):
 
 
 class CardDataset(Dataset):
-    def __init__(self, card_data, tokenizer, max_lenght=320, tags_len=None, dataset_name="tag"):
+    def __init__(self, card_data, tokenizer, max_length=320, tags_len=None, dataset_name="tag"):
         
         self.tokenizer = tokenizer
         self.data = card_data
-        self.max_lenght = max_lenght
+        self.max_length = max_length
         self.tags_len = tags_len
     
 
@@ -351,7 +351,7 @@ def build_training_components_tag(config, bert_model, tag_model, device, tag_mod
     #print optimizer parameters
     print("Optimizer parameters:")
     for param_group in optimizer.param_groups:
-        print(f"  - Learning rate: {param_group['lr']}, Params: {len(param_group['params'])}")
+        print(f"  - Learning rate: {param_group['lr']}, Params: {len(param_group['params'])}, Name: {param_group['name'] if 'name' in param_group else 'default'}")
 
     if config.get("use_focal", False):
         # Use FocalLoss, normalize alpha if provided
@@ -917,14 +917,14 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
         tokenizer,
         max_length=config["max_length_bert_tokenizer"],
         tags_len=config.get("tag_output_dim", None),
-        debug_dataset=True,
+        dataset_name="train_tag",
     )
     val_dataset = CardDataset(
         val_data,
         tokenizer,
         max_length=config["max_length_bert_tokenizer"],
         tags_len=config.get("tag_output_dim", None),
-        debug_dataset=True,
+        dataset_name="val_tag",
     )
 
     train_loader = DataLoader(
@@ -962,11 +962,14 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
         desc="Epochs Tag",
         initial=start_epoch,
     ):
-        print_separator()
         # Unfreeze BERT when freeze period is over
         if freeze_epochs and epoch-start_epoch == freeze_epochs:
             print(f"Unfreezing BERT at epoch {epoch}")
             bert_model.unfreeze_bert()
+            print("Optimizer parameters:")
+            for param_group in optimizer.param_groups:
+                print(f"  - Learning rate: {param_group['lr']}, Params: {len(param_group['params'])}, Name: {param_group['name'] if 'name' in param_group else 'default'}")
+            print_separator()
 
         train_tag_loop(
             bert_model,
@@ -1023,14 +1026,14 @@ def run_training_multitask(config):
     print("Loading BERT model and tokenizer...")
      # Step 2: Initialize BERT model and tokenizer
     model_name = config["bert_model_name"]
-    embedding_dim = config.get("embedding_dim", 384)
+    embedding_dim = config.get("bert_embedding_dim")
     bert_model, tokenizer, device = build_bert_model(model_name, embedding_dim)
     print(f"Using BERT model: {model_name} with embedding dimension: {embedding_dim}")
 
     
     tag_model = build_tag_model(
         "tagModel",
-        input_dim=config.get("tag_input_dim"),
+        input_dim=config.get("bert_embedding_dim"),
         output_dim=config.get("tag_output_dim"),
         hidden_dims=config.get("tag_hidden_dims"),
         dropout=config.get("tag_dropout"),
@@ -1106,7 +1109,7 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
 
     train_loader = data_loaders["train"]
 
-    synergy_model = build_synergy_model(config["synergy_arch"], config["embedding_dim"]).to(
+    synergy_model = build_synergy_model(config["synergy_arch"], config["bert_embedding_dim"]).to(
         device
     )
 

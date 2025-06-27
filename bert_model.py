@@ -53,7 +53,7 @@ class BertEmbedRegressor(nn.Module):
 
         elif self.model_name == "distilbert-base-uncased":
             # Freeze embeddings
-            for param in self.bert.transformer.embeddings.parameters():
+            for param in self.bert.embeddings.parameters():
                 param.requires_grad = False
             # Freeze transformer layers
             for i, layer in enumerate(self.bert.transformer.layer):
