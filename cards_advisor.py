@@ -8,25 +8,20 @@ import random
 
 # Configuration
 EMBEDDING_DIM = 384
-TAG_CHECKPOINT_FILE = "checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/tag_model_epoch_9.pth"
-SYNERGY_CHECKPOINT_FILE = "checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/synergy_model_epoch_9.pth"
-BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250622170831_withuri.json"
+TAG_PROJECTOR_OUTPUT_DIM = 128
+SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/synergy_model_epoch_24.pth"
+BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250629133008.json"
 TOP_N = 30  # how many cards to recommend
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def load_embeddings_cards(path):
+def load_lookup_cards(path):
     with open(path, "r", encoding="utf-8") as f:
         cards = json.load(f)
-    lookup_emb = {}
     lookup_cards = {}
-    for card in cards:
-        emb = card.get("emb", [])
-        if isinstance(emb, list) and len(emb) == 1 and len(emb[0]) == EMBEDDING_DIM:
-            lookup_emb[card["name"]] = torch.tensor(emb[0], dtype=torch.float)
-        
+    for card in cards:        
         lookup_cards[card["name"]] = card
-    return lookup_emb, lookup_cards
+    return lookup_cards
 
 
 def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
@@ -55,14 +50,9 @@ def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[:top_n]
 
-def recommend_cards_commander(current_deck, all_embeddings, all_cards, model, top_n=TOP_N, commander_name=None):
+def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, commander_name=None):
     model.eval()
     candidates = []
-
-    # Validate current deck embeddings
-    deck_embeddings = [all_embeddings[name] for name in current_deck if name in all_embeddings]
-    if not deck_embeddings:
-        raise ValueError("No valid embeddings found for current deck.")
 
     # Commander colors (if given)
     allowed_colors = None
@@ -74,21 +64,43 @@ def recommend_cards_commander(current_deck, all_embeddings, all_cards, model, to
             raise ValueError(f"Commander {commander_name} not found or has no color info.")
 
     with torch.no_grad():
-        for card_name, emb in tqdm(all_embeddings.items(), desc="Evaluating cards", unit="card"):
+        for card_name, card in tqdm(all_cards.items(), desc="Evaluating cards", unit="card"):
             if card_name in current_deck:
                 continue  # Skip existing cards
 
-            card_info = all_cards.get(card_name, {})
             if allowed_colors:
-                card_colors = set(card_info.get("colors", []))
+                card_colors = set(card.get("colors", []))
                 if not card_colors.issubset(allowed_colors):
                     continue  # Skip cards outside commander's color identity
 
+            emb = torch.tensor(card.get("emb")).to(DEVICE)
+            if emb is None:
+                continue
+
+            tag_projection = torch.tensor(card.get("tags_projection")).to(DEVICE)
+            if tag_projection is None:
+                continue
+
             # Synergy score between candidate and each card in the deck
             scores = []
-            for deck_emb in deck_embeddings:
-                input_emb = torch.cat([deck_emb.unsqueeze(0), emb.unsqueeze(0)], dim=1).to(DEVICE)
-                logit = model(input_emb[:, :EMBEDDING_DIM], input_emb[:, EMBEDDING_DIM:])
+            for deck_card_name in current_deck:
+                if deck_card_name not in all_cards:
+                    continue
+                deck_card = all_cards[deck_card_name]
+                deck_emb =  torch.tensor(deck_card.get("emb")).to(DEVICE)
+                deck_tag_projection =  torch.tensor(deck_card.get("tags_projection")).to(DEVICE)
+
+                if deck_tag_projection.dim() == 3:
+                    deck_tag_projection = deck_tag_projection.squeeze(0)
+                if tag_projection.dim() == 3:
+                    tag_projection = tag_projection.squeeze(0)
+
+                logit = model(
+                    emb, deck_emb, deck_tag_projection, tag_projection
+                )
+                if logit is None:
+                    print(f"Logit is None for {card_name} against {deck_card_name}. Skipping.")
+                    continue
                 # print(f"Evaluating {card_name} against deck embeddings. logit shape: {logit.shape}, logit: {logit}")
                 score = torch.sigmoid(logit).item()
                 scores.append(score)
@@ -136,32 +148,11 @@ def decklist_to_array(decklist):
 
 
 if __name__ == "__main__":
-    deck = """1 Abyssal Harvester
-1 Ad Nauseam
-1 Agadeem's Awakening
-1 Akroma's Will
-1 Ancient Brass Dragon
-1 Anguished Unmaking
-1 Animate Dead
-1 Arcane Signet
-1 Archfiend of Depravity
-1 Archfiend of Despair
-1 Arena of Glory
-1 Armageddon
-1 Aurelia, the Warleader
-1 Swords to Plowshares
-1 Talisman of Conviction
-1 Thrilling Discovery
-1 Unburial Rites
-1 Valgavoth, Terror Eater
-1 Victimize
-1 Vile Mutilator
-1 Vilis, Broker of Blood
-
-1 Kaalia of the Vast
+    deck = """
+1 Warren Soultrader
 """
     current_deck = decklist_to_array(deck)
-    commander = "Kaalia of the Vast"
+    commander = None
     #get 30 cards from the deck at random
     if len(current_deck) > 30:
         current_deck = random.sample(current_deck, 30)
@@ -169,15 +160,12 @@ if __name__ == "__main__":
     print("deck length:", len(current_deck))
 
     print(" Loading data...")
-    all_embeddings, all_cards = load_embeddings_cards(BULK_EMBEDDING_FILE)
+    all_cards = load_lookup_cards(BULK_EMBEDDING_FILE)
 
     print(" Loading model...")
-    synergy_model = ModelComplex(EMBEDDING_DIM).to(DEVICE)
+    synergy_model = ModelComplex(EMBEDDING_DIM, TAG_PROJECTOR_OUTPUT_DIM).to(DEVICE)
     synergy_model.load_state_dict(torch.load(SYNERGY_CHECKPOINT_FILE))
     synergy_model.eval()
-
-    #def __init__(self, input_dim=384, hidden_dim=512, output_dim=271, dropout=0.2):
-    tag_model = TagModel(input_dim=EMBEDDING_DIM, hidden_dim=512, output_dim=271, dropout=0.2).to(DEVICE)
 
 
     # print(" Recommending cards...")
@@ -194,7 +182,7 @@ if __name__ == "__main__":
 
     print("\n Recommending cards with commander...")
     top_recommendations_commander = recommend_cards_commander(
-        current_deck, all_embeddings, all_cards, synergy_model, commander_name=commander
+        current_deck, all_cards, synergy_model, commander_name=commander
     )
     print("\n Top Recommendations with Commander:")
     for name, score in top_recommendations_commander:

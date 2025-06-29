@@ -722,7 +722,7 @@ def train_tag_loop(
 
     avg_loss = total_tag_loss / len(dataloader)
 
-    log_metrics_tag(writer, epoch, avg_loss, all_preds_tag if calc_metrics else [], all_labels_tag if calc_metrics else [], "Train Tag")
+    log_metrics_tag(writer, epoch, avg_loss, all_preds_tag if calc_metrics else [], all_labels_tag if calc_metrics else [], "Train")
 
 def eval_tag_loop(
     bert_model,
@@ -757,7 +757,7 @@ def eval_tag_loop(
 
     avg_loss = total_tag_loss / len(dataloader)
 
-    log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, "Val Tag")
+    log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, "Val")
 
 def train_multitask_loop(
     bert_model,
@@ -981,6 +981,7 @@ def setup_dirs_writer(config):
     start_epoch = config.get("start_epoch", 0)
     if start_epoch is None:
         start_epoch = 0
+    
     if start_epoch > 0:
         print(f"Resuming from epoch {start_epoch}")
         # Load the last save model writer and logs
@@ -1013,8 +1014,6 @@ def setup_dirs_writer(config):
 
         writer = SummaryWriter(log_dir=log_full_dir)
 
-        
-
         # write var config with writer
         writer.add_text("Config", json.dumps(config, indent=4))
     
@@ -1027,8 +1026,10 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
 
     set_color("blue")
 
+    bert_model.unfreeze_bert()
+
     # --- Freeze BERT based on config ---
-    freeze_epochs = config.get("freeze_bert_epochs_tag", 0)
+    freeze_epochs = config.get("freeze_bert_epochs_tag", None)
     freeze_layers = config.get("freeze_bert_layers_tag", None)
 
     if freeze_layers == "all":
@@ -1102,12 +1103,18 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
     )
 
     print_separator()
+    end_epoch = config.get("epochs_tag", 0)+ start_epoch
     print(f"Starting training for tag model for {config['epochs_tag']} epochs...\n")
+    print(f"starting epoch: {start_epoch}, to epoch: {end_epoch}")
+    if end_epoch <= start_epoch:
+        print("No epochs to train for tag model, exiting.")
+        return
 
     for epoch in tqdm(
-        range(start_epoch, config["epochs_tag"]),
+        range(start_epoch, end_epoch),
         desc="Epochs Tag",
         initial=start_epoch,
+        unit="epoch",
     ):
         # Unfreeze BERT when freeze period is over
         if freeze_epochs and epoch-start_epoch == freeze_epochs:
@@ -1158,8 +1165,6 @@ def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokeni
     torch.save(tag_model.state_dict(), os.path.join(save_full_dir, "tag_tag_only_final_model.pt"))
     print("Final models saved.")
     print_separator()
-    print("unfreeze BERT model for multitask training")
-    bert_model.unfreeze_bert()
         
 def run_training_multitask(config):
     """
@@ -1224,7 +1229,10 @@ def run_training_multitask(config):
 
 def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model):
     
+    
     set_color("green")
+
+    bert_model.unfreeze_bert()  # Ensure BERT is unfrozen for multitask training
 
     print_separator()
     print("Starting Multitask Model Training")
@@ -1234,7 +1242,7 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
     real_indices, fake_indices = get_real_fake_indices(config["synergy_file"])
 
     # --- Freeze BERT based on config ---
-    freeze_epochs = config.get("freeze_bert_epochs_multi", 0)
+    freeze_epochs = config.get("freeze_bert_epochs_multi", None)
     freeze_layers = config.get("freeze_bert_layers_multi", None)
 
     if freeze_layers == "all":
@@ -1363,10 +1371,12 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
                     tag_loss_weight=config.get("tag_loss_weight"),
                 )
 
+    end_epoch = start_epoch + config.get("epochs_multi", 0)
     print_separator()
-    print(f"Starting training for {config['epochs_multi']} epochs...\n")
+    print(f"Starting training for multitask model {config['epochs_multi']} epochs...\n")
+    print(f"starting epoch: {start_epoch}, to epoch: {end_epoch}")
     for epoch in tqdm(
-        range(start_epoch, config["epochs_multi"]+config.get("epochs_tag", 0)),
+        range(start_epoch, end_epoch),
         desc="Epochs",
         initial=start_epoch
     ):
@@ -1403,13 +1413,13 @@ def train_multitask_model(config, writer, save_full_dir, start_epoch, bert_model
         if (epoch + 1) % config["save_every"] == 0:
             print_separator()
             bert_model_path = os.path.join(
-                save_full_dir, f"bert_model_epoch_{epoch + 1}.pth"
+                save_full_dir, f"bert_multi_model_epoch_{epoch + 1}.pth"
             )
             synergy_model_path = os.path.join(
                 save_full_dir, f"synergy_model_epoch_{epoch + 1}.pth"
             )
             tag_model_path = os.path.join(
-                save_full_dir, f"tag_model_epoch_{epoch + 1}.pth"
+                save_full_dir, f"tag_multi_model_epoch_{epoch + 1}.pth"
             )
             tag_projector_model_path = os.path.join(
                 save_full_dir, f"tag_projector_model_epoch_{epoch + 1}.pth"

@@ -2,19 +2,29 @@ import os
 import json
 import re
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+import time
 from tqdm import tqdm
-from transformers import BertTokenizer, BertModel
 import bert_parsing
-import conf
-from bert_model import BertEmbedRegressor, build_bert_model
+from bert_model import build_bert_model
+from tag_model import build_tag_model
+from tag_projector_model import build_tag_projector_model
 
 
-MODEL_NAME = "distilbert-base-uncased"
-EMBEDDING_DIM = 384  # Should match the dimension of tag embeddings
-MAX_LEN = 256
-CHECKPOINT_FILE="checkpoints/joint_training_tag/complexSin_distilbert_tag_AdamW_20250622_175623/bert_model_epoch_9.pth"
+BERT_MODEL_NAME = "distilbert-base-uncased"
+EMBEDDING_DIM = 384  
+MAX_LEN = 280
+BERT_CHECKPOINT_FILE="checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/bert_multi_model_epoch_24.pth"
 
+TAG_HIDDEN_DIMS = [512, 256]
+TAG_OUTPUT_DIM = 103
+TAG_DROPOUT = 0.3
+TAG_USE_SIGMOID_OUTPUT = True
+TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_multi_model_epoch_24.pth"
+
+TAG_PROJECTOR_OUTPUT_DIM = 128
+TAG_PROJECTOR_HIDDEN_DIM = 256
+TAG_PROJECTOR_DROPOUT = 0.3
+TAG_PROJECTOR_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_projector_model_epoch_24.pth"
 
 
 def get_embedding_from_card(card, model, tokenizer, device):
@@ -28,64 +38,116 @@ def get_embedding_from_card(card, model, tokenizer, device):
             return outputs.cpu().numpy()
     else:
         return None
+
+def get_tags_and_projection_from_emb(emb, tag_model, tag_projector_model, device):
+    """
+    Given an embedding, calculates the tags and their projection.
+    Returns a tuple of (tags, projection).
+    """
+    emb_tensor = torch.tensor(emb, dtype=torch.float32).unsqueeze(0).to(device)
     
-def minify_emb_arrays(json_str):
+    with torch.no_grad():
+        tags = tag_model(emb_tensor)
+        projection = tag_projector_model(tags)
+    
+    return tags.cpu().numpy(), projection.cpu().numpy()
+    
+def minify_large_arrays(json_str):
     """
-    Flattens any "emb": [[...]] arrays into one line, preserving the rest of the formatting.
-    Assumes emb is always a 2D array with shape (1, 384).
+    Flattens the arrays for "emb", "tags", and "tags_projection" into one line,
+    whether they are 2D ([[...]]) or 3D ([[[...]]]) arrays.
     """
-    # Match "emb": followed by exactly two brackets with numbers inside (with optional whitespace)
-    pattern = re.compile(
-        r'("emb": )\[\s*\[\s*((?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*,?\s*){10,})\s*\]\s*\]',
-        re.DOTALL
-    )
 
-    def replacer(match):
-        key = match.group(1)
-        values = match.group(2)
-        # Strip all unnecessary whitespace/newlines
-        compact_values = re.sub(r'\s+', '', values)
-        return f'{key}[[{compact_values}]]'
+    target_fields = ["emb", "tags", "tags_projection"]
 
-    return pattern.sub(replacer, json_str)
+    for field in target_fields:
+        # Match both [[...]] and [[[...]]]
+        pattern = re.compile(
+            rf'"({field})"\s*:\s*(\[\s*(?:\[\s*)*(?:-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?\s*,?\s*)+(?:\s*\]\s*)*\])',
+            re.DOTALL
+        )
+
+        def replacer(match):
+            key = match.group(1)
+            array_text = match.group(2)
+            # Remove all internal whitespace/newlines
+            compact = re.sub(r'\s+', '', array_text)
+            return f'"{key}": {compact}'
+
+        json_str = pattern.sub(replacer, json_str)
+
+    return json_str
 
 def load_bulk_file(bulk_file):
     with open(bulk_file, "r", encoding="utf-8") as f:
         data = json.load(f)
     return data
 
-def create_embedding_file(bulk_file, save_every=2000):
-    model, tokenizer, device = build_bert_model(MODEL_NAME, EMBEDDING_DIM)
-    model.load_state_dict(torch.load(CHECKPOINT_FILE))
+def create_embedding_file(bulk_file, save_every=2000, calculate_tags=False, output_file=None):
+    model, tokenizer, device = build_bert_model(BERT_MODEL_NAME, EMBEDDING_DIM)
+    model.load_state_dict(torch.load(BERT_CHECKPOINT_FILE))
     model.eval()
+
+    if calculate_tags:
+        print("Calculating tags and tags projector")
+        tag_model = build_tag_model(
+            arch_name="tagModel",
+            input_dim=EMBEDDING_DIM,
+            hidden_dims=TAG_HIDDEN_DIMS,
+            output_dim=TAG_OUTPUT_DIM,
+            dropout=TAG_DROPOUT,
+            use_batchnorm=None,
+            use_sigmoid_output=TAG_USE_SIGMOID_OUTPUT
+        ).to(device)
+        tag_model.load_state_dict(torch.load(TAG_CHECKPOINT_FILE))
+        tag_model.eval()
+
+        tag_projector_model = build_tag_projector_model(
+            num_tags=TAG_OUTPUT_DIM,
+            hidden_dim=TAG_PROJECTOR_HIDDEN_DIM,
+            output_dim=TAG_PROJECTOR_OUTPUT_DIM,
+            dropout=TAG_PROJECTOR_DROPOUT
+        ).to(device)
+        tag_projector_model.load_state_dict(torch.load(TAG_PROJECTOR_CHECKPOINT_FILE))
+        tag_projector_model.eval()
 
     cards = load_bulk_file(bulk_file)
     counter_save = 0
     for card in tqdm(cards, desc="Processing cards"):
-        # Check if the card already has an embedding
-        if "emb" not in card:
-            card_emb = get_embedding_from_card(card, model, tokenizer, device)
-            card["emb"] = card_emb.tolist() if card_emb is not None else None
+        card_emb = get_embedding_from_card(card, model, tokenizer, device)
+        if card_emb is not None:
+            card["emb"] = card_emb.tolist() 
+            if calculate_tags:
+                tags, projection = get_tags_and_projection_from_emb(card_emb, tag_model, tag_projector_model, device)
+                card["tags"] = tags.tolist()
+                card["tags_projection"] = projection.tolist()
+        else:
+            #error handling
+            print(f"Error processing card: {card.get('name', 'Unknown')}")
 
-            counter_save += 1
 
-            if counter_save > save_every:
-                
-                with open(bulk_file, "w", encoding="utf-8") as f:
-                    pretty_json = json.dumps(cards, indent=4)
-                    compacted = minify_emb_arrays(pretty_json)
-                    f.write(compacted)
-                counter_save = 0
+        counter_save += 1
+
+        if counter_save > save_every:
+            
+            with open(output_file, "w", encoding="utf-8") as f:
+                pretty_json = json.dumps(cards, indent=4)
+                compacted = minify_large_arrays(pretty_json)
+                f.write(compacted)
+            counter_save = 0
                 
         
         
 
     # #save
 
-    with open(bulk_file, "w", encoding="utf-8") as f:
+    with open(output_file, "w", encoding="utf-8") as f:
         pretty_json = json.dumps(cards, indent=2)
-        compacted = minify_emb_arrays(pretty_json)
+        compacted = minify_large_arrays(pretty_json)
         f.write(compacted)
 
 if __name__ == "__main__":
-    create_embedding_file("datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250622170831_withuri.json", save_every=10000)
+    time = time.strftime("%Y%m%d%H%M%S")
+    os.makedirs("datasets/processed/embedding_predicted/joint_tag", exist_ok=True)
+    output_file = f"datasets/processed/embedding_predicted/joint_tag/cards_with_tags_{time}.json"
+    create_embedding_file("datasets/processed/tag_included/cards_with_tags_103_20250627182008.json", save_every=5000, output_file=output_file, calculate_tags=True)
