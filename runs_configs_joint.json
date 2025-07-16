@@ -6,19 +6,21 @@
 
       "use_scheduler": false,
 
-      "start_epoch": 24,
-      "run_name_previous":"two_phase_joint_training_tag_20250629_124355",
-      "bert_checkpoint_tag": null,
-      "bert_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124355/bert_multi_model_epoch_24.pth",
-      "tag_checkpoint_tag": null,
-      "tag_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124355/tag_multi_model_epoch_24.pth",
-      "synergy_checkpoint": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124355/synergy_model_epoch_24.pth",
-      "tag_projector_checkpoint": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124355/tag_projector_model_epoch_24.pth",
+      "start_epoch": 0,
+      "run_name_previous": null,
+
+      "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/bert_tag_only_epoch_15.pt",
+      "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_tag_only_model_epoch_15.pt",
+
+      "bert_checkpoint_multi": null,
+      "tag_checkpoint_multi": null,
+      "synergy_checkpoint": null,
+      "tag_projector_checkpoint": null,
 
       "freeze_bert_epochs_tag": null,
       "freeze_bert_layers_tag": null,
-      "freeze_bert_epochs_multi": null,
-      "freeze_bert_layers_multi": null,
+      "freeze_bert_epochs_multi": 5,
+      "freeze_bert_layers_multi": 6,
 
       "bert_model_name": "distilbert-base-uncased",
       "bert_learning_rate_multi": 1e-5,
@@ -33,8 +35,8 @@
       "optimizer": "Adam",
       "optimizer_config": {},
 
-      "epochs_multi": 6,
-      "epochs_tag": 0,
+      "epochs_multi": 20,
+      "epochs_tag": 10,
 
       "batch_size": 5,
       "accumulation_steps": 4,
@@ -56,24 +58,24 @@
         "val": 0.1
       },
       "splits" : {
-        "train": {"real": 0.5, "fake": 0.15},
+        "train": {"real": 0.5, "fake": 0.2},
         "val_real": {"real": 0.1, "fake": 0.0},
         "val_real_fake": {"real": 0.1, "fake": 0.03}
       },
       
       "tag_learning_rate_tag": 5e-4,
-      "tag_learning_rate_multi": 5e-5,
+      "tag_learning_rate_multi": 1e-4,
 
       "tag_hidden_dims": [512, 256],
       "tag_output_dim": 103,
-      "tag_loss_weight": 0.2,
+      "tag_loss_weight": 0.5,
       "tag_dropout": 0.3,
       "use_focal": true,
       "focal_gamma": 2.0,
       "tag_use_sigmoid_output": false,
 
-      "tag_projector_output_dim": 128,
-      "tag_projector_hidden_dim": 256,
+      "tag_projector_output_dim": 64,
+      "tag_projector_hidden_dim": 32,
       "tag_projector_dropout": 0.3,
       "tag_projector_learning_rate": 5e-4,
       "train_calc_metrics": true,
