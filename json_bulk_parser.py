@@ -83,7 +83,7 @@ def handle_normal_cards(card):
         "layout": card.get("layout", "normal"),
     }
 
-def handle_special_layouts(card):
+def handle_special_layouts(card, special_layouts_noflip):
     """
     Handle special card layouts (split, transform, flip, modal_dfc, adventure).
     These cards include multiple faces that must be stored and interpreted properly.
@@ -99,7 +99,7 @@ def handle_special_layouts(card):
     result_faces = []
 
     for face in card_faces:
-        result_faces.append({
+        face_obj = {
             "name": face.get("name", ""),
             "mana_cost": face.get("mana_cost", ""),
             "type_line": face.get("type_line", ""),
@@ -108,8 +108,10 @@ def handle_special_layouts(card):
             "toughness": face.get("toughness", ""),
             "loyalty": face.get("loyalty", ""),
             "colors": face.get("colors", []),
-            "image_uris": face.get("image_uris", {}),
-        })
+        }
+        if layout not in special_layouts_noflip:
+            face_obj["image_uris"] = face.get("image_uris", {})
+        result_faces.append(face_obj)
 
     simplified = {
         "name": card.get("name"),
@@ -121,6 +123,11 @@ def handle_special_layouts(card):
         "layout": layout,
         "card_faces": result_faces,
     }
+
+    if layout in special_layouts_noflip:
+        # For modal double-faced cards, we need to include the `image_uris` from the first face
+        if card_faces:
+            simplified["image_uris"] = card.get("image_uris", {})
 
     return simplified
 
@@ -143,6 +150,12 @@ def filter_commander_legal_cards_and_process(
         "flip",
         "adventure",
     ]
+
+    special_layouts_noflip = [
+        "flip",
+        "split",
+        "adventure",
+    ]
     try:
         # Load the input JSON file
         with open(input_file, "r", encoding="utf-8") as f:
@@ -162,7 +175,7 @@ def filter_commander_legal_cards_and_process(
             layout = card.get("layout", "")
             if layout in special_layouts:
                 # Handle special layouts
-                filtered_card = handle_special_layouts(card)
+                filtered_card = handle_special_layouts(card, special_layouts_noflip)
             else:
                 # Handle normal cards
                 filtered_card = handle_normal_cards(card)

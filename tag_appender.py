@@ -41,9 +41,9 @@ def add_tag_to_card(card, tag_data, include_tags=None):
         if include_tags is not None:
             # Filter tags based on include_tags
             tags = [tag for tag in tags if tag in include_tags]
-        card['tags'] = tags
+        card["tags_labels"] = tags
     else:
-        card['tags'] = None
+        card["tags_labels"] = None
     return card
 
 def add_tags_to_all_cards(card_data, tag_data, include_tags=None):
@@ -124,12 +124,12 @@ if __name__ == "__main__":
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     tag_data = load_tag_data(input_file_tagger)
 
-    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=120)
+    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=0)
     tag_to_index = {tag: idx for idx, tag in enumerate(tags_to_include)}
-    print(tag_to_index)
+    # print(tag_to_index)
     print(f"Total tags to include: {len(tags_to_include)}")
 
-    input_file_processed_json = conf.processed_json
+    input_file_processed_json = "datasets/processed/indent/commander_legal_cards20250630171009.json"
 
     card_data = filter_cards_by_sets(get_all_card_without_duplicate(input_file_processed_json), conf.all_sets)
     print(f"Total cards after set filter: {len(card_data)}")
