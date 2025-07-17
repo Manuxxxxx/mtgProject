@@ -9,8 +9,8 @@
       "start_epoch": 0,
       "run_name_previous": null,
 
-      "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/bert_tag_only_epoch_15.pt",
-      "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_tag_only_model_epoch_15.pt",
+      "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250716_184839/bert_tag_only_final.pt",
+      "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250716_184839/tag_tag_only_final_model.pt",
 
       "bert_checkpoint_multi": null,
       "tag_checkpoint_multi": null,
@@ -36,7 +36,7 @@
       "optimizer_config": {},
 
       "epochs_multi": 20,
-      "epochs_tag": 10,
+      "epochs_tag": 0,
 
       "batch_size": 5,
       "accumulation_steps": 4,
