@@ -54,63 +54,84 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
     model.eval()
     candidates = []
 
-    # Commander colors (if given)
+    # Commander color identity (if provided)
     allowed_colors = None
     if commander_name:
         commander_info = all_cards.get(commander_name)
         if commander_info and "colors" in commander_info:
             allowed_colors = set(commander_info["colors"])
         else:
-            raise ValueError(f"Commander {commander_name} not found or has no color info.")
+            raise ValueError(f"Commander '{commander_name}' not found or missing color info.")
+
+    # Preprocess deck embeddings and tag projections
+    deck_embs, deck_tags = [], []
+
+    for deck_card_name in current_deck:
+        deck_card = all_cards.get(deck_card_name)
+        if not deck_card:
+            continue
+
+        try:
+            emb = torch.tensor(deck_card["emb_predicted"][0], device=DEVICE)
+            tag = torch.tensor(deck_card["tags_preds_projection"][0][0], device=DEVICE)
+        except (KeyError, IndexError, TypeError):
+            print(f"Skipping malformed deck card: {deck_card_name}")
+            continue
+
+        if emb.shape[-1] != 384 or tag.shape[-1] != 64:
+            print(f"Skipping {deck_card_name} due to invalid shape: emb={emb.shape}, tag={tag.shape}")
+            continue
+
+        deck_embs.append(emb)
+        deck_tags.append(tag)
+
+    if not deck_embs:
+        raise ValueError("No valid deck embeddings found.")
+
+    deck_embs_tensor = torch.stack(deck_embs)       # shape: [deck_size, 384]
+    deck_tags_tensor = torch.stack(deck_tags)       # shape: [deck_size, 64]
 
     with torch.no_grad():
         for card_name, card in tqdm(all_cards.items(), desc="Evaluating cards", unit="card"):
             if card_name in current_deck:
-                continue  # Skip existing cards
+                continue
 
             if allowed_colors:
                 card_colors = set(card.get("colors", []))
                 if not card_colors.issubset(allowed_colors):
-                    continue  # Skip cards outside commander's color identity
+                    continue
 
-            emb = torch.tensor(card.get("emb_predicted")).to(DEVICE)
-            if emb is None:
+            try:
+                emb = torch.tensor(card["emb_predicted"][0], device=DEVICE)
+                tag_proj = torch.tensor(card["tags_preds_projection"][0][0], device=DEVICE)
+            except (KeyError, IndexError, TypeError):
                 continue
 
-            tag_projection = torch.tensor(card.get("tags_preds_projection")).to(DEVICE)
-            if tag_projection is None:
+            if emb.shape[-1] != 384 or tag_proj.shape[-1] != 64:
                 continue
 
-            # Synergy score between candidate and each card in the deck
-            scores = []
-            for deck_card_name in current_deck:
-                if deck_card_name not in all_cards:
+            # Expand candidate to match deck size for batch inference
+            batch_emb = emb.unsqueeze(0).expand(deck_embs_tensor.size(0), -1)         # [deck_size, 384]
+            batch_tag_proj = tag_proj.unsqueeze(0).expand(deck_tags_tensor.size(0), -1)  # [deck_size, 64]
+
+            try:
+                logits = model(batch_emb, deck_embs_tensor, deck_tags_tensor, batch_tag_proj)
+                if logits is None:
                     continue
-                deck_card = all_cards[deck_card_name]
-                deck_emb =  torch.tensor(deck_card.get("emb")).to(DEVICE)
-                deck_tag_projection =  torch.tensor(deck_card.get("tags_projection")).to(DEVICE)
 
-                if deck_tag_projection.dim() == 3:
-                    deck_tag_projection = deck_tag_projection.squeeze(0)
-                if tag_projection.dim() == 3:
-                    tag_projection = tag_projection.squeeze(0)
+                scores = torch.sigmoid(logits).squeeze()
+                if scores.dim() == 0:
+                    scores = scores.unsqueeze(0)  # Handle scalar case
+                scores = scores.tolist()
 
-                logit = model(
-                    emb, deck_emb, deck_tag_projection, tag_projection
-                )
-                if logit is None:
-                    print(f"Logit is None for {card_name} against {deck_card_name}. Skipping.")
-                    continue
-                # print(f"Evaluating {card_name} against deck embeddings. logit shape: {logit.shape}, logit: {logit}")
-                score = torch.sigmoid(logit).item()
-                scores.append(score)
+                avg_score = sum(scores) / len(scores)
+                max_score = max(scores)
+                final_score = 0.7 * avg_score + 0.3 * max_score
+                candidates.append((card_name, final_score))
 
-            # Weighted score: prefer cards that synergize broadly across deck
-            avg_score = sum(scores) / len(scores)
-            max_score = max(scores)
-            final_score = 0.7 * avg_score + 0.3 * max_score  # tunable weights
-
-            candidates.append((card_name, final_score))
+            except Exception as e:
+                print(f"Error processing {card_name}: {e}")
+                continue
 
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[:top_n]
