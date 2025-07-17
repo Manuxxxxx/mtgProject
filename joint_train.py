@@ -637,7 +637,7 @@ def log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_los
     cm_synergy = confusion_matrix(all_labels_synergy, all_preds_synergy)
 
     print(
-        f"{label_prefix} | Loss: {avg_loss:.4f}  "
+        f"{label_prefix} [{epoch+1}]| Loss: {avg_loss:.4f}  "
         f"| Synergy Loss: {avg_synergy_loss:.4f} | Precision Synergy: {precision_synergy:.4f} | Recall Synergy: {recall_synergy:.4f} | F1 Synergy: {f1_synergy:.4f} |"
     )
 
@@ -681,7 +681,7 @@ def log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, labe
     f1_tag = f1_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
     cm_tag = confusion_matrix(np.array(all_labels_tag).flatten(), binary_preds_tag.flatten())
 
-    print(f"{label_prefix} | Tag Loss: {avg_loss:.4f} | Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
+    print(f"{label_prefix} [{epoch+1}]| Tag Loss: {avg_loss:.4f} | Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
 
     writer.add_scalar(f"{label_prefix}_tag/Precision", precision_tag, epoch)
     writer.add_scalar(f"{label_prefix}_tag/Recall", recall_tag, epoch)
