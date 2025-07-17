@@ -8,10 +8,10 @@ import random
 
 # Configuration
 EMBEDDING_DIM = 384
-TAG_PROJECTOR_OUTPUT_DIM = 128
-SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/synergy_model_epoch_24.pth"
-BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250629133008.json"
-TOP_N = 30  # how many cards to recommend
+TAG_PROJECTOR_OUTPUT_DIM = 64
+SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/synergy_model_epoch_18.pth"
+BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250718003320.json"
+TOP_N = 40  # how many cards to recommend
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -73,11 +73,11 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
                 if not card_colors.issubset(allowed_colors):
                     continue  # Skip cards outside commander's color identity
 
-            emb = torch.tensor(card.get("emb")).to(DEVICE)
+            emb = torch.tensor(card.get("emb_predicted")).to(DEVICE)
             if emb is None:
                 continue
 
-            tag_projection = torch.tensor(card.get("tags_projection")).to(DEVICE)
+            tag_projection = torch.tensor(card.get("tags_preds_projection")).to(DEVICE)
             if tag_projection is None:
                 continue
 
@@ -149,7 +149,60 @@ def decklist_to_array(decklist):
 
 if __name__ == "__main__":
     deck = """
-1 Warren Soultrader
+1 Cinder Glade
+1 Clifftop Retreat
+1 Command Tower
+1 Cultivate
+1 Dawn's Truce
+1 Dazzling Theater // Prop Room
+1 Doubling Season
+1 Drumbellower
+1 Elspeth, Storm Slayer
+1 Enduring Vitality
+1 Exotic Orchard
+1 Farmer Cotton
+1 Farseek
+1 Finneas, Ace Archer
+1 For the Common Good
+1 Gilded Goose
+1 Grand Crescendo
+1 Halo Fountain
+1 Hare Apparent
+1 Heroic Intervention
+1 Hop to It
+1 Hour of Reckoning
+1 Idol of Oblivion
+1 Impact Tremors
+1 Intangible Virtue
+1 Jacked Rabbit
+1 Jaheira, Friend of the Forest
+1 Jetmir's Garden
+1 Jetmir, Nexus of Revels
+1 Jungle Shrine
+1 Lightning Greaves
+1 March of the Multitudes
+1 Mondrak, Glory Dominus
+1 Nature's Lore
+1 Ocelot Pride
+1 Ojer Taq, Deepest Foundation
+1 Parallel Lives
+1 Path to Exile
+1 Peregrin Took
+1 Purphoros, God of the Forge
+1 Queen Allenal of Ruadach
+1 Rampant Growth
+1 Reliquary Tower
+1 Rhys the Redeemed
+1 Rootbound Crag
+1 Rosie Cotton of South Lane
+1 Sacred Foundry
+1 Scute Swarm
+1 Season of the Burrow
+1 Second Harvest
+1 Secure the Wastes
+1 Seedborn Muse
+1 Skullclamp
+1 Smothering Tithe
 """
     current_deck = decklist_to_array(deck)
     commander = None

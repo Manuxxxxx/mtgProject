@@ -13,18 +13,18 @@ from tag_projector_model import build_tag_projector_model
 BERT_MODEL_NAME = "distilbert-base-uncased"
 EMBEDDING_DIM = 384  
 MAX_LEN = 280
-BERT_CHECKPOINT_FILE="checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/bert_multi_model_epoch_24.pth"
+BERT_CHECKPOINT_FILE="checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/bert_multi_model_epoch_18.pth"
 
 TAG_HIDDEN_DIMS = [512, 256]
 TAG_OUTPUT_DIM = 103
 TAG_DROPOUT = 0.3
 TAG_USE_SIGMOID_OUTPUT = True
-TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_multi_model_epoch_24.pth"
+TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/tag_multi_model_epoch_18.pth"
 
-TAG_PROJECTOR_OUTPUT_DIM = 128
-TAG_PROJECTOR_HIDDEN_DIM = 256
+TAG_PROJECTOR_OUTPUT_DIM = 64
+TAG_PROJECTOR_HIDDEN_DIM = 32
 TAG_PROJECTOR_DROPOUT = 0.3
-TAG_PROJECTOR_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250629_124626/tag_projector_model_epoch_24.pth"
+TAG_PROJECTOR_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/tag_projector_model_epoch_18.pth"
 
 
 def get_embedding_from_card(card, model, tokenizer, device):
@@ -58,7 +58,7 @@ def minify_large_arrays(json_str):
     whether they are 2D ([[...]]) or 3D ([[[...]]]) arrays.
     """
 
-    target_fields = ["emb", "tags", "tags_projection"]
+    target_fields = ["emb_predicted", "tags_predicted", "tags_preds_projection"]
 
     for field in target_fields:
         # Match both [[...]] and [[[...]]]
@@ -116,11 +116,11 @@ def create_embedding_file(bulk_file, save_every=2000, calculate_tags=False, outp
     for card in tqdm(cards, desc="Processing cards"):
         card_emb = get_embedding_from_card(card, model, tokenizer, device)
         if card_emb is not None:
-            card["emb"] = card_emb.tolist() 
+            card["emb_predicted"] = card_emb.tolist() 
             if calculate_tags:
                 tags, projection = get_tags_and_projection_from_emb(card_emb, tag_model, tag_projector_model, device)
-                card["tags"] = tags.tolist()
-                card["tags_projection"] = projection.tolist()
+                card["tags_predicted"] = tags.tolist()
+                card["tags_preds_projection"] = projection.tolist()
         else:
             #error handling
             print(f"Error processing card: {card.get('name', 'Unknown')}")
