@@ -77,25 +77,56 @@ def query_synergies_cached(sets_key, min_score, max_score, scale):
     nodes = {}
     edges = []
     for a, b, score in rows:
+        # Create node A if not exists
         if a not in nodes:
             nodes[a] = {
-                "data": {"id": str(a), "label": card_names[a]},
-                "position": {"x": float(umap_coords[a][0]*scale), "y": float(umap_coords[a][1]*scale)}
+                "data": {
+                    "id": str(a),
+                    "label": card_names[a]
+                },
+                "position": {
+                    "x": float(umap_coords[a][0] * scale),
+                    "y": float(umap_coords[a][1] * scale)
+                }
             }
+
+        # Create node B if not exists
         if b not in nodes:
             nodes[b] = {
-                "data": {"id": str(b), "label": card_names[b]},
-                "position": {"x": float(umap_coords[b][0]*scale), "y": float(umap_coords[b][1]*scale)}
+                "data": {
+                    "id": str(b),
+                    "label": card_names[b]
+                },
+                "position": {
+                    "x": float(umap_coords[b][0] * scale),
+                    "y": float(umap_coords[b][1] * scale)
+                }
             }
+
+        width = max(1, (score - min_score) * 10)
+
+        # Add edge A -> B
         edges.append({
             "data": {
                 "id": f"{a}_{b}",
                 "source": str(a),
                 "target": str(b),
                 "score": score,
-                "width": max(1, (score - min_score) * 10)
+                "width": width
             }
         })
+
+        # Add edge B -> A (duplicate in opposite direction)
+        edges.append({
+            "data": {
+                "id": f"{b}_{a}",
+                "source": str(b),
+                "target": str(a),
+                "score": score,
+                "width": width
+            }
+        })
+
     print(f"Found {len(nodes)} nodes and {len(edges)} edges")
     return list(nodes.values()), edges
 

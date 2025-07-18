@@ -107,10 +107,10 @@
     <label>Max Synergy Score: <span id="maxScoreVal">1.0</span></label>
     <input type="range" id="maxScore" min="0.5" max="1.0" step="0.01" value="1.0" />
 
-    <label>UMAP Scale: <span id="scaleVal">1000</span></label>
-    <input type="range" id="scaleSlider" min="50" max="2500" step="50" value="1000" />
+    <label>UMAP Scale: <span id="scaleVal">100</span></label>
+    <input type="range" id="scaleSlider" min="20" max="300" step="20" value="100" />
 
-    <button onclick="loadGraph()">Update Graph1</button>
+    <button onclick="loadGraph()">Update Graph</button>
   </div>
 
   <div id="cy"></div>
@@ -194,8 +194,6 @@
                   'width': 'data(width)',
                   'line-color': '#bbb',
                   'curve-style': 'bezier',
-                  'target-arrow-shape': 'triangle',
-                  'target-arrow-color': '#bbb'
                 }
               },
               {
@@ -212,13 +210,15 @@
                 selector: '.selected-edge',
                 style: {
                   'line-color': '#FF4136',
-                  'target-arrow-color': '#FF4136',
                   'width': 4
                 }
               }
             ],
             layout: { name: 'preset' },
           });
+
+          document.getElementById('cy').style.backgroundColor = '#1e1e1e';
+
 
           cy.on('tap', 'node', evt => {
             const node = evt.target;
@@ -236,6 +236,7 @@
           if (focusNodeId) {
             selectNode(focusNodeId);
           }
+
         });
       console.log('Graph loaded with sets:', selectedSets, 'minScore:', minScore, 'maxScore:', maxScore, 'scale:', scale);
     }
@@ -366,9 +367,9 @@
 
     // Initialize default sets selection
     (() => {
-      // Select first 3 sets by default
+      // Select first set by default
       const opts = selector.options;
-      for (let i=0; i < opts.length && i < 3; i++) {
+      for (let i=0; i < opts.length && i < 1; i++) {
         opts[i].selected = true;
       }
       loadGraph();
