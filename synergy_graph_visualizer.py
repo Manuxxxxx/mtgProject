@@ -116,17 +116,6 @@ def query_synergies_cached(sets_key, min_score, max_score, scale):
             }
         })
 
-        # Add edge B -> A (duplicate in opposite direction)
-        edges.append({
-            "data": {
-                "id": f"{b}_{a}",
-                "source": str(b),
-                "target": str(a),
-                "score": score,
-                "width": width
-            }
-        })
-
     print(f"Found {len(nodes)} nodes and {len(edges)} edges")
     return list(nodes.values()), edges
 

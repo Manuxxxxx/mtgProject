@@ -107,8 +107,8 @@
     <label>Max Synergy Score: <span id="maxScoreVal">1.0</span></label>
     <input type="range" id="maxScore" min="0.5" max="1.0" step="0.01" value="1.0" />
 
-    <label>UMAP Scale: <span id="scaleVal">100</span></label>
-    <input type="range" id="scaleSlider" min="20" max="300" step="20" value="100" />
+    <label>UMAP Scale: <span id="scaleVal">25</span></label>
+    <input type="range" id="scaleSlider" min="15" max="100" step="5" value="25" />
 
     <button onclick="loadGraph()">Update Graph</button>
   </div>
@@ -258,7 +258,9 @@
 
       // Highlight edges from this node
       const outEdges = node.outgoers('edge');
+      const inEdges = node.incomers('edge');
       outEdges.addClass('selected-edge');
+      inEdges.addClass('selected-edge');
 
       selectedNodeId = nodeId;
 
@@ -326,11 +328,17 @@
         ${tags ? `<p><strong>Tags:</strong> ${tags}</p>` : ""}
       `;
 
-      // Find connected nodes:
-      const connectedNodeIds = node.connectedEdges().connectedNodes().filter(n => n.id() !== node.id()).map(n => n.id());
-      // Deduplicate and sort by label
-      const connectedNodes = [...new Set(connectedNodeIds)].map(id => cy.getElementById(id));
+      // Get all edges connected to the node either as source or target
+      const connectedEdges = cy.edges().filter(edge => {
+        return edge.source().id() === node.id() || edge.target().id() === node.id();
+      });
+
+      // Then get all connected nodes from these edges except the node itself
+      const connectedNodes = connectedEdges.connectedNodes().filter(n => n.id() !== node.id());
+
+      // Sort by label as you want
       connectedNodes.sort((a,b) => a.data('label').localeCompare(b.data('label')));
+
 
       // Build connected cards list HTML
       let connectedHtml = "";
