@@ -124,8 +124,22 @@ def filter_existing_pairs(conn, pairs):
     filtered = [p for p in pairs if p not in done_pairs]
     return filtered
 
+def estimate_remaining_pairs(card_names, start_from):
+    start_index = 0
+    if start_from in card_names:
+        start_index = card_names.index(start_from)
+    n = len(card_names)
+    # Sum of (n - i - 1) for i in [start_index, n - 1] = (n - start_index - 1) * (n - start_index) // 2
+    remaining = (n - start_index - 1) * (n - start_index) // 2
+    return remaining
+
+
 
 def main():
+    debug = False  # Set to True for debug mode
+
+
+
     print("🔍 Loading cards...")
     all_cards_raw = load_lookup_cards(BULK_EMBEDDING_FILE)
     all_cards = filter_cards(all_cards_raw)
@@ -159,10 +173,24 @@ def main():
 
     # Lazy batch pairs generator
     print("⚙️ Processing synergy pairs in batches...")
+    remaining_pairs = estimate_remaining_pairs(card_names, last_processed_card)
+    total_batches = (remaining_pairs + CHUNK_SIZE - 1) // CHUNK_SIZE  # ceiling division
+
+    n = len(card_names)
+    total_possible_pairs = n * (n - 1) // 2
+
+    done_pairs_count = total_possible_pairs - remaining_pairs
+
+    print(f"📊 Synergy pairs done (estimate): {done_pairs_count:,}")
+    print(f"🕐 Remaining to compute (estimate): {remaining_pairs:,} out of {total_possible_pairs:,} total pairs")
+    if debug:
+        print(f"ACTUAL Number of entries in DB: {cur.execute('SELECT COUNT(*) FROM synergies').fetchone()[0]}")
+
+
     for pairs_batch in tqdm(
         batch_pairs(card_names, CHUNK_SIZE, start_from=last_processed_card),
         desc="Processing pairs",
-        total=len(card_names) * (len(card_names) - 1) // 2 // CHUNK_SIZE,
+        total=total_batches,
     ):
         pairs_batch = filter_existing_pairs(conn, pairs_batch)
         if not pairs_batch:
