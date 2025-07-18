@@ -125,10 +125,24 @@
   </div>
 
   <script>
-    const sets = {{ sets | tojson }};
+    let sets = {{ sets | tojson }};
     const selector = document.getElementById('setSelector');
     let cy = null;
     let selectedNodeId = null;
+
+
+    //exclude sets with "Token" in the name
+    for (const code in sets) {
+      if (sets[code].includes("Token")) {
+        delete sets[code];
+      }
+    }
+
+    // sort the sets by the name not the code
+    const sortedSets = Object.entries(sets).sort((a, b) => a[1].localeCompare(b[1]));
+    sets = Object.fromEntries(sortedSets);
+
+    
 
     // Populate sets dropdown with name and code
     for (const [code, name] of Object.entries(sets)) {
@@ -192,7 +206,7 @@
                 selector: 'edge',
                 style: {
                   'width': 'data(width)',
-                  'line-color': '#bbb',
+                  'line-color': '#6fe3a3',
                   'curve-style': 'bezier',
                 }
               },
@@ -329,9 +343,7 @@
       `;
 
       // Get all edges connected to the node either as source or target
-      const connectedEdges = cy.edges().filter(edge => {
-        return edge.source().id() === node.id() || edge.target().id() === node.id();
-      });
+      const connectedEdges = node.outgoers('edge').union(node.incomers('edge'));
 
       // Then get all connected nodes from these edges except the node itself
       const connectedNodes = connectedEdges.connectedNodes().filter(n => n.id() !== node.id());

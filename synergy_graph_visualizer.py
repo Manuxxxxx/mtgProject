@@ -9,13 +9,17 @@ from cards_advisor import load_lookup_cards
 from calculate_all_synergy import filter_cards
 import conf
 
-def load_or_compute_umap(all_cards, card_names, umap_file_path="umap_coords.npy", n_components=2):
+def load_or_compute_umap(all_cards, card_names, umap_file_path="umap_coords.npy", n_components=2, bert=False):
     if os.path.exists(umap_file_path):
         print(f"Loading UMAP coords from {umap_file_path}...")
         coords = np.load(umap_file_path)
     else:
         print(f"UMAP file not found. Computing UMAP coords with {n_components} components...")
-        embeddings = [np.array(all_cards[name]['tags_preds_projection'][0][0]) for name in card_names]
+        if bert:
+            embeddings = [np.array(all_cards[name]['emb_predicted'][0]) for name in card_names]
+        else:
+            embeddings = [np.array(all_cards[name]['tags_preds_projection'][0][0]) for name in card_names]
+        
         embeddings = np.vstack(embeddings)
         reducer = umap.UMAP(n_components=n_components, random_state=42)
         coords = reducer.fit_transform(embeddings)
@@ -29,27 +33,12 @@ def extract_all_sets():
 
 app = Flask(__name__)
 
+USE_BERT = True  # Set to True if you want to use BERT embeddings, False for UMAP
 DB_FILE = "synergy_cache_compressed.sqlite"
 BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250718003320.json"
 UMAP_FILE = "umap_coords.npy"
+UMAP_BERT_FILE = "umap_bert_coords.npy"
 EDGE_LIMIT = 2000
-
-print("Loading and filtering cards...")
-all_cards_raw = load_lookup_cards(BULK_EMBEDDING_FILE)
-all_cards = filter_cards(all_cards_raw)
-card_names = list(all_cards.keys())
-name_to_idx = {name: i for i, name in enumerate(card_names)}
-all_sets = extract_all_sets()
-
-# Load all cards info from bulk JSON for details panel:
-with open(BULK_EMBEDDING_FILE, "r", encoding="utf-8") as f:
-    bulk_cards_data = json.load(f)
-
-# Map card name to full info for quick lookup:
-card_info_map = {card["name"]: card for card in bulk_cards_data}
-
-umap_coords = load_or_compute_umap(all_cards, card_names, umap_file_path=UMAP_FILE)
-conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 
 @lru_cache(maxsize=128)
 def query_synergies_cached(sets_key, min_score, max_score, scale):
@@ -159,4 +148,28 @@ def card_info():
     return jsonify(card_info_map[card_name])
 
 if __name__ == "__main__":
-    app.run(debug=True)
+
+    print("Loading and filtering cards...")
+    all_cards_raw = load_lookup_cards(BULK_EMBEDDING_FILE)
+    all_cards = filter_cards(all_cards_raw)
+    card_names = list(all_cards.keys())
+    name_to_idx = {name: i for i, name in enumerate(card_names)}
+    all_sets = extract_all_sets()
+
+    # Load all cards info from bulk JSON for details panel:
+    with open(BULK_EMBEDDING_FILE, "r", encoding="utf-8") as f:
+        bulk_cards_data = json.load(f)
+
+    # Map card name to full info for quick lookup:
+    card_info_map = {card["name"]: card for card in bulk_cards_data}
+
+    if USE_BERT:
+        print("Loading UMAP coordinates for BERT embeddings...")
+        umap_coords = load_or_compute_umap(all_cards, card_names, umap_file_path=UMAP_BERT_FILE, bert=True)
+    else:
+        print("Loading UMAP coordinates for standard embeddings...")
+        # Use the same UMAP file for both BERT and standard embeddings
+        umap_coords = load_or_compute_umap(all_cards, card_names, umap_file_path=UMAP_FILE, bert=False)
+    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
+
+    app.run(debug=True, use_reloader=False)
