@@ -231,7 +231,7 @@ def save_cards(cards, output_file, output_dir, indent_bol=True):
         with open(output_dir + "no_indent/" + output_file, "w", encoding="utf-8") as f:
             json.dump(cards, f, ensure_ascii=False)
 
-def extract_all_sets(bulk_file):
+def extract_all_sets_from_file(bulk_file):
     """
     Extract all sets from the bulk file.
 
@@ -250,6 +250,14 @@ def extract_all_sets(bulk_file):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return []
+    
+def extract_all_sets(bulk_data):
+    sets = set()
+    for card in bulk_data:
+        sets.add(card.get("set"))
+
+    return list(sets)
+
     
 
 

@@ -84,8 +84,8 @@ def query_synergies_cached(sets_key, min_score, max_score):
                     "label": card_names[a]
                 },
                 "position": {
-                    "x": float(umap_coords[a][0]*1000),
-                    "y": float(umap_coords[a][1]*1000)
+                    "x": float(umap_coords[a][0]*100),
+                    "y": float(umap_coords[a][1]*100)
                 }
                 }
 
@@ -96,8 +96,8 @@ def query_synergies_cached(sets_key, min_score, max_score):
                     "label": card_names[b]
                 },
                 "position": {
-                    "x": float(umap_coords[b][0]*1000),
-                    "y": float(umap_coords[b][1]*1000)
+                    "x": float(umap_coords[b][0]*100),
+                    "y": float(umap_coords[b][1]*100)
                 }
             }
             
