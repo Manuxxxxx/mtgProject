@@ -1,11 +1,10 @@
 import json
 import torch
 import sqlite3
-import itertools
 from tqdm import tqdm
-from multiprocessing import Pool, cpu_count
 from synergy_model import ModelComplex  # Replace with actual import path to your model
 from cards_advisor import load_lookup_cards
+from math import comb
 
 # === CONFIG ===
 EMBEDDING_DIM = 384
@@ -13,89 +12,54 @@ TAG_PROJECTOR_OUTPUT_DIM = 64
 SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/synergy_model_epoch_18.pth"
 BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250718003320.json"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-DB_FILE = "synergy_cache.sqlite"
-CHUNK_SIZE = 1000
+DB_FILE = "synergy_cache_compressed.sqlite"
+CHUNK_SIZE = 15000
 # ==============
 
-
-# === FILTERING FUNCTION ===
 def filter_cards(all_cards):
-    """
-    Filters out cards based on configurable conditions.
-    Modify or comment out filters as needed.
-    """
     filtered = {}
     for name, card in all_cards.items():
-        type_line = card.get("type_line", "")
-
-        # ❌ Ignore Lands
-        if "Land" in type_line:
+        if "Land" in card.get("type_line", ""):
             continue
-
-        # ✅ Other filters (optional - toggle by uncommenting)
-
-        # Ignore cards with missing embeddings
-        # if "emb_predicted" not in card or "tags_preds_projection" not in card:
-        #     continue
-
-        # Ignore tokens
-        # if "Token" in type_line:
-        #     continue
-
-        # Ignore silver-border cards
-        # if card.get("border_color") == "silver":
-        #     continue
-
         filtered[name] = card
     return filtered
 
-
-# === SQLITE DB SETUP ===
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS synergies (
-            card_a TEXT,
-            card_b TEXT,
+            idx_a INTEGER,
+            idx_b INTEGER,
             score REAL,
-            PRIMARY KEY (card_a, card_b)
+            PRIMARY KEY (idx_a, idx_b)
+        );
+    """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS meta (
+            key TEXT PRIMARY KEY,
+            value INTEGER
         );
     """)
     conn.commit()
     return conn
 
-
-def is_pair_done(conn, a, b):
+def get_last_processed_index(conn):
     cur = conn.cursor()
-    cur.execute("SELECT 1 FROM synergies WHERE card_a=? AND card_b=?", (a, b))
-    return cur.fetchone() is not None
-
-
-def get_last_processed_card(conn):
-    cur = conn.cursor()
-    cur.execute("SELECT card_a FROM synergies ORDER BY rowid DESC LIMIT 1")
+    cur.execute("SELECT value FROM meta WHERE key = 'last_idx_a'")
     row = cur.fetchone()
-    return row[0] if row else None
+    return int(row[0]) if row else 0
 
-def batch_pairs(card_names, chunk_size, start_from=None):
-    """
-    Generator yielding batches of unique (a, b) pairs.
-    """
-    start_index = 0
-    if start_from:
-        try:
-            start_index = card_names.index(start_from)
-        except ValueError:
-            print(f"⚠️ Warning: start_from '{start_from}' not found in card_names")
+def set_last_processed_index(conn, idx):
+    cur = conn.cursor()
+    cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ("last_idx_a", idx))
+    conn.commit()
 
-    total = len(card_names)
+def batch_pairs(card_count, chunk_size, start_idx=0):
     batch = []
-    for i in range(start_index, total):
-        a = card_names[i]
-        for j in range(i + 1, total):
-            b = card_names[j]
-            batch.append((a, b))
+    for i in range(start_idx, card_count):
+        for j in range(i + 1, card_count):
+            batch.append((i, j))
             if len(batch) >= chunk_size:
                 yield batch
                 batch = []
@@ -103,120 +67,93 @@ def batch_pairs(card_names, chunk_size, start_from=None):
         yield batch
 
 
-def filter_existing_pairs(conn, pairs):
-    """
-    Query DB to find which pairs are already computed.
-    Returns filtered pairs that are NOT in DB yet.
-    """
-    if not pairs:
-        return []
-
-    placeholders = ",".join(["(?,?)"] * len(pairs))
-    query = f"SELECT card_a, card_b FROM synergies WHERE (card_a, card_b) IN ({placeholders})"
-    flattened = []
-    for a, b in pairs:
-        flattened.extend([a, b])
-
-    cur = conn.cursor()
-    cur.execute(query, flattened)
-    done_pairs = set(cur.fetchall())
-
-    filtered = [p for p in pairs if p not in done_pairs]
-    return filtered
-
-def estimate_remaining_pairs(card_names, start_from):
-    start_index = 0
-    if start_from in card_names:
-        start_index = card_names.index(start_from)
-    n = len(card_names)
-    # Sum of (n - i - 1) for i in [start_index, n - 1] = (n - start_index - 1) * (n - start_index) // 2
-    remaining = (n - start_index - 1) * (n - start_index) // 2
-    return remaining
-
-
+def count_remaining_pairs(n, start_idx):
+    return comb(n - start_idx, 2)
 
 def main():
-    debug = False  # Set to True for debug mode
+    debug = False
 
-
-
-    print("🔍 Loading cards...")
+    print("🔍 Loading and filtering cards...")
     all_cards_raw = load_lookup_cards(BULK_EMBEDDING_FILE)
     all_cards = filter_cards(all_cards_raw)
     print(f"✅ Filtered {len(all_cards_raw) - len(all_cards)} cards. Remaining: {len(all_cards)}")
 
     card_names = list(all_cards.keys())
+    name_to_idx = {name: i for i, name in enumerate(card_names)}
+    idx_to_name = {i: name for i, name in enumerate(card_names)}
+    n = len(card_names)
+    total_possible_pairs = n * (n - 1) // 2
 
     print("💾 Initializing database...")
     conn = init_db()
+    cur = conn.cursor()
+    last_idx = get_last_processed_index(conn)
 
-    print("📦 Loading model to GPU...")
+    print("📦 Loading model...")
     model = ModelComplex(EMBEDDING_DIM, TAG_PROJECTOR_OUTPUT_DIM).to(DEVICE)
     model.load_state_dict(torch.load(SYNERGY_CHECKPOINT_FILE, map_location=DEVICE))
     model.eval()
 
-    print("📥 Preloading card tensors on GPU...")
-    emb_dict = {}
-    tag_dict = {}
-    for name, card in all_cards.items():
-        emb = torch.tensor(card["emb_predicted"][0], device=DEVICE)
-        tag = torch.tensor(card["tags_preds_projection"][0][0], device=DEVICE)
-        emb_dict[name] = emb
-        tag_dict[name] = tag
+    print("⚙️ Caching embeddings on GPU...")
+    emb_dict = {i: torch.tensor(all_cards[name]["emb_predicted"][0], device=DEVICE) for i, name in idx_to_name.items()}
+    tag_dict = {i: torch.tensor(all_cards[name]["tags_preds_projection"][0][0], device=DEVICE) for i, name in idx_to_name.items()}
 
-    print("📍 Getting last processed card to resume...")
-    last_processed_card = get_last_processed_card(conn)
-    print(f"🔁 Resuming from card: {last_processed_card}")
+    remaining_pairs = count_remaining_pairs(n, last_idx)
+    remaining_batches = remaining_pairs // CHUNK_SIZE + (1 if remaining_pairs % CHUNK_SIZE > 0 else 0)
+    done_pairs = total_possible_pairs - remaining_pairs
+    session_pairs = 0  # Pairs processed during this run
 
-    cur = conn.cursor()
-    total_pairs_processed = 0
+    print(f"📊 Estimated progress:")
+    print(f"   ✅ Done: {done_pairs:,}")
+    print(f"   🕐 Remaining: {remaining_pairs:,} of {total_possible_pairs:,} total")
 
-    # Lazy batch pairs generator
-    print("⚙️ Processing synergy pairs in batches...")
-    remaining_pairs = estimate_remaining_pairs(card_names, last_processed_card)
-    total_batches = (remaining_pairs + CHUNK_SIZE - 1) // CHUNK_SIZE  # ceiling division
-
-    n = len(card_names)
-    total_possible_pairs = n * (n - 1) // 2
-
-    done_pairs_count = total_possible_pairs - remaining_pairs
-
-    print(f"📊 Synergy pairs done (estimate): {done_pairs_count:,}")
-    print(f"🕐 Remaining to compute (estimate): {remaining_pairs:,} out of {total_possible_pairs:,} total pairs")
     if debug:
-        print(f"ACTUAL Number of entries in DB: {cur.execute('SELECT COUNT(*) FROM synergies').fetchone()[0]}")
+        actual = cur.execute("SELECT COUNT(*) FROM synergies").fetchone()[0]
+        print(f"   ⚙️ Actual entries in DB: {actual}")
 
+    print("🚀 Starting batch processing...")
 
-    for pairs_batch in tqdm(
-        batch_pairs(card_names, CHUNK_SIZE, start_from=last_processed_card),
-        desc="Processing pairs",
-        total=total_batches,
-    ):
-        pairs_batch = filter_existing_pairs(conn, pairs_batch)
-        if not pairs_batch:
-            continue
+    current_i = last_idx
 
-        emb_a_batch = torch.stack([emb_dict[a] for a, b in pairs_batch]).to(DEVICE)
-        tag_a_batch = torch.stack([tag_dict[a] for a, b in pairs_batch]).to(DEVICE)
-        emb_b_batch = torch.stack([emb_dict[b] for a, b in pairs_batch]).to(DEVICE)
-        tag_b_batch = torch.stack([tag_dict[b] for a, b in pairs_batch]).to(DEVICE)
+    for batch in tqdm(batch_pairs(n, CHUNK_SIZE, start_idx=last_idx), desc="Processing pairs", total=remaining_batches):
+        emb_a_batch = torch.stack([emb_dict[i] for i, j in batch])
+        tag_a_batch = torch.stack([tag_dict[i] for i, j in batch])
+        emb_b_batch = torch.stack([emb_dict[j] for i, j in batch])
+        tag_b_batch = torch.stack([tag_dict[j] for i, j in batch])
 
         with torch.no_grad():
             logits = model(emb_a_batch, emb_b_batch, tag_b_batch, tag_a_batch)
             scores = torch.sigmoid(logits).squeeze().cpu().tolist()
 
-        for (a, b), score in zip(pairs_batch, scores):
-            cur.execute(
-                "INSERT OR REPLACE INTO synergies (card_a, card_b, score) VALUES (?, ?, ?)",
-                (a, b, score),
-            )
+        for (i, j), score in zip(batch, scores):
+            cur.execute("INSERT OR REPLACE INTO synergies (idx_a, idx_b, score) VALUES (?, ?, ?)", (i, j, score))
         conn.commit()
-        total_pairs_processed += len(pairs_batch)
+
+        # Checkpoint after batch (based on first i in batch)
+        current_i = batch[0][0]
+        set_last_processed_index(conn, current_i)
+
+        done_pairs += len(batch)
+        session_pairs += len(batch)
+        remaining_pairs = total_possible_pairs - done_pairs
+
+        # Print progress every 10 million
+        if session_pairs % 10_000_000 < len(batch):
+            print("\n------ Progress Update ------")
+            print(f"\n📈 Progress Update:")
+            print(f"   ✅ Total processed: {done_pairs:,}")
+            print(f"   🔄 Session processed: {session_pairs:,}")
+            print(f"   ⏳ Remaining: {remaining_pairs:,}")
+            print(f"   📊 Total: {total_possible_pairs:,}\n")
 
     conn.close()
-    print(f"✅ Done! Processed {total_pairs_processed} synergy pairs.")
-
-
+    print("\n------------------------------------")
+    print("✅ All pairs processed and saved to database.")
+    print(f"\n📈 Progress Update:")
+    print(f"   ✅ Total processed: {done_pairs:,}")
+    print(f"   🔄 Session processed: {session_pairs:,}")
+    print(f"   ⏳ Remaining: {remaining_pairs:,}")
+    print(f"   📊 Total: {total_possible_pairs:,}\n")
 
 if __name__ == "__main__":
     main()
