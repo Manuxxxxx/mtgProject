@@ -24,10 +24,8 @@ def load_or_compute_umap(all_cards, card_names, umap_file_path="umap_coords.npy"
 
     return coords
 
-
 def extract_all_sets():
     return conf.mtg_sets_dict
-
 
 app = Flask(__name__)
 
@@ -43,11 +41,19 @@ card_names = list(all_cards.keys())
 name_to_idx = {name: i for i, name in enumerate(card_names)}
 all_sets = extract_all_sets()
 
+# Load all cards info from bulk JSON for details panel:
+with open(BULK_EMBEDDING_FILE, "r", encoding="utf-8") as f:
+    bulk_cards_data = json.load(f)
+
+# Map card name to full info for quick lookup:
+card_info_map = {card["name"]: card for card in bulk_cards_data}
+
 umap_coords = load_or_compute_umap(all_cards, card_names, umap_file_path=UMAP_FILE)
 conn = sqlite3.connect(DB_FILE, check_same_thread=False)
 
 @lru_cache(maxsize=128)
 def query_synergies_cached(sets_key, min_score, max_score, scale):
+    print(f"Querying synergies for sets: {sets_key}, score range: [{min_score}, {max_score}], scale: {scale}")
     selected_sets = sets_key.split(",")
     filtered_card_names = {name for name, card in all_cards.items() if card.get("set") in selected_sets}
     selected_idxs = {name_to_idx[n] for n in filtered_card_names if n in name_to_idx}
@@ -90,7 +96,7 @@ def query_synergies_cached(sets_key, min_score, max_score, scale):
                 "width": max(1, (score - min_score) * 10)
             }
         })
-
+    print(f"Found {len(nodes)} nodes and {len(edges)} edges")
     return list(nodes.values()), edges
 
 def parse_sets_param(sets_param):
@@ -108,16 +114,29 @@ def index():
 
 @app.route("/graph_data")
 def graph_data():
-    sets_selected = parse_sets_param(request.args.getlist("sets[]"))
-    min_score = float(request.args.get("min_score", 0.9))
-    max_score = float(request.args.get("max_score", 1.0))
-    scale = float(request.args.get("scale", 1000))
-    if not sets_selected:
-        return jsonify({"nodes": [], "edges": []})
+    print(">>> /graph_data hit")
+    print("Query args:", request.args)
+    try:
+        sets_selected = parse_sets_param(request.args.getlist("sets[]"))
+        min_score = float(request.args.get("min_score", 0.9))
+        max_score = float(request.args.get("max_score", 1.0))
+        scale = float(request.args.get("scale", 1000))
+        if not sets_selected:
+            return jsonify({"nodes": [], "edges": []})
 
-    sets_key = ",".join(sorted(sets_selected))
-    nodes, edges = query_synergies_cached(sets_key, min_score, max_score, scale)
-    return jsonify({"nodes": nodes, "edges": edges})
+        sets_key = ",".join(sorted(sets_selected))
+        nodes, edges = query_synergies_cached(sets_key, min_score, max_score, scale)
+        return jsonify({"nodes": nodes, "edges": edges})
+    except Exception as e:
+        print(f"Error processing graph data: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/card_info")
+def card_info():
+    card_name = request.args.get("name")
+    if not card_name or card_name not in card_info_map:
+        return jsonify({"error": "Card not found"}), 404
+    return jsonify(card_info_map[card_name])
 
 if __name__ == "__main__":
     app.run(debug=True)
