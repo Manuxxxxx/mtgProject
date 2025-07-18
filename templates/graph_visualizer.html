@@ -1,72 +1,96 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>MTG Synergy Graph with UMAP Layout</title>
-  <script src="https://unpkg.com/cytoscape/dist/cytoscape.min.js"></script>
+  <title>Synergy Graph Visualizer</title>
+  <script src="https://unpkg.com/cytoscape@3.21.1/dist/cytoscape.min.js"></script>
   <style>
-    #cy { width: 100%; height: 90vh; border: 1px solid #ccc; }
-    #controls { padding: 10px; }
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    #cy {
+      width: 100%;
+      height: 800px;
+      border: 1px solid #ccc;
+      margin-top: 20px;
+    }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <label for="sets-select">Select Sets (Ctrl+Click multiple):</label><br/>
-    <select id="sets-select" multiple size="8" style="width:300px;">
-      {% for s in sets %}
-      <option value="{{s}}">{{s}}</option>
-      {% endfor %}
-    </select>
-    <br/><br/>
-    <label for="threshold-range">Synergy Threshold: <span id="threshold-val">0.9</span></label><br/>
-    <input type="range" id="threshold-range" min="0" max="1" step="0.01" value="0.9" style="width:300px;">
-  </div>
-  <div id="cy"></div>
+
+<h2>MTG Synergy Graph</h2>
+
+<label for="sets">Select Sets (max 5):</label>
+<select id="sets" multiple size="10">
+  {% for s in sets %}
+    <option value="{{ s }}">{{ s }}</option>
+  {% endfor %}
+</select>
+
+<br><br>
+
+<label for="min_score">Min Score:</label>
+<input type="number" step="0.01" id="min_score" value="0.90" min="0" max="1">
+
+<label for="max_score">Max Score:</label>
+<input type="number" step="0.01" id="max_score" value="1.00" min="0" max="1">
+
+<button onclick="loadGraph()">Update Graph</button>
+
+<div id="cy"></div>
 
 <script>
-  const cy = cytoscape({
-    container: document.getElementById('cy'),
-    style: [
-      { selector: 'node', style: { 'label': 'data(label)', 'text-valign': 'center', 'color': '#000', 'background-color': '#61bffc' } },
-      { selector: 'edge', style: { 'width': 'data(width)', 'line-color': '#ccc', 'curve-style': 'bezier' } },
-    ],
-    layout: { name: 'preset' }  // use positions from backend
-  });
+function loadGraph() {
+  const selectedSets = Array.from(document.getElementById("sets").selectedOptions)
+                            .slice(0, 5)
+                            .map(opt => opt.value);
+  const min_score = document.getElementById("min_score").value;
+  const max_score = document.getElementById("max_score").value;
 
-  const setsSelect = document.getElementById('sets-select');
-  const thresholdRange = document.getElementById('threshold-range');
-  const thresholdVal = document.getElementById('threshold-val');
+  const params = new URLSearchParams();
+  selectedSets.forEach(s => params.append("sets[]", s));
+  params.append("min_score", min_score);
+  params.append("max_score", max_score);
 
-  async function loadGraph() {
-    const selectedSets = Array.from(setsSelect.selectedOptions).map(opt => opt.value);
-    const minScore = thresholdRange.value;
+  fetch("/graph_data?" + params.toString())
+    .then(res => res.json())
+    .then(data => {
+      cytoscape({
+        container: document.getElementById('cy'),
+        elements: {
+          nodes: data.nodes,
+          edges: data.edges
+        },
+        layout: {
+          name: 'preset'
+        },
+        style: [
+          {
+            selector: 'node',
+            style: {
+              'label': 'data(label)',
+              'width': 10,
+              'height': 10,
+              'background-color': '#0074D9'
+            }
+          },
+          {
+            selector: 'edge',
+            style: {
+              'width': 'data(width)',
+              'line-color': '#999',
+              'target-arrow-shape': 'triangle'
+            }
+          }
+        ]
+      });
+    });
+}
 
-    if(selectedSets.length === 0) {
-      cy.elements().remove();
-      return;
-    }
-
-    const params = new URLSearchParams();
-    selectedSets.forEach(s => params.append('sets[]', s));
-    params.append('min_score', minScore);
-
-    const res = await fetch('/graph_data?' + params.toString());
-    const data = await res.json();
-
-    cy.elements().remove();
-    cy.add(data.nodes);
-    cy.add(data.edges);
-    // layout is preset, positions assigned from server
-  }
-
-  // Initial load with first set selected by default
-  setsSelect.selectedIndex = 0;
+window.onload = () => {
+  document.getElementById("sets").selectedIndex = 0;
   loadGraph();
-
-  setsSelect.addEventListener('change', loadGraph);
-  thresholdRange.addEventListener('input', () => {
-    thresholdVal.textContent = thresholdRange.value;
-  });
-  thresholdRange.addEventListener('change', loadGraph);
+};
 </script>
 
 </body>
