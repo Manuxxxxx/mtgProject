@@ -4,7 +4,7 @@ import re
 import torch
 import time
 from tqdm import tqdm
-import mtgProject.src.utils.bert_parsing as bert_parsing
+import mtgProject.src.training_utils.bert_parsing as bert_parsing
 from mtgProject.src.models.bert_model import build_bert_model
 from mtgProject.src.models.tag_model import build_tag_model
 from mtgProject.src.models.tag_projector_model import build_tag_projector_model
