@@ -4,7 +4,7 @@ import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader
 from tqdm import tqdm
 import numpy as np
 import time
@@ -12,149 +12,17 @@ import sys
 from torch.amp import autocast, GradScaler
 from transformers import get_linear_schedule_with_warmup
 
-from mtgProject.src.models.losses.focal_loss import FocalLoss
 from mtgProject.src.models.tag_model import  build_tag_model
 from mtgProject.src.models.bert_model import build_bert_model
 from mtgProject.src.models.synergy_model import build_synergy_model, calculate_synergy_weighted_FP_loss
 from mtgProject.src.models.tag_projector_model import build_tag_projector_model
 
-from mtgProject.src.training_utils.generic_training_utils import set_color, calculate_stats_lenght_tokenizer_and_plot, set_seed, print_separator, get_real_fake_indices, print_models_param_summary, split_indices
+from mtgProject.src.training_utils.generic_training_utils import set_color, set_seed, print_separator, get_real_fake_indices, print_models_param_summary, split_indices
 from mtgProject.src.training_utils.loss_scaler import LossScaler
-from mtgProject.src.training_utils.datasets import CardDataset, JointCardDataset
+from mtgProject.src.training_utils.datasets import CardDataset
 from mtgProject.src.training_utils.metrics import log_metrics_multitask, log_metrics_tag, setup_dirs_writer, update_metrics_multi
-
-def get_loss_tag_fn(
-    config, device, tag_model_pos_weight=None
-):
-    """
-    Build the loss function for the tag model based on the configuration.
-    If use_focal is True, use FocalLoss; otherwise, use weighted BCE.
-    """
-    if config.get("use_focal", False):
-        # Use FocalLoss, normalize alpha if provided
-        if tag_model_pos_weight is not None:
-            alpha = tag_model_pos_weight / tag_model_pos_weight.max()  # Normalize to 0–1
-        else:
-            alpha = None
-
-        loss_tag_fn = FocalLoss(
-            alpha=alpha,
-            gamma=config.get("focal_gamma", 2.0)
-        ).to(device)
-
-        print("Using Focal Loss for tag model with alpha:", alpha, "and gamma:", config.get("focal_gamma", 2.0))
-
-    else:
-        # Use weighted BCE
-        loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
-        print("Using weighted BCE Loss for tag model with pos_weight:", tag_model_pos_weight)
-
-    return loss_tag_fn
-
-def build_training_components_tag(config, bert_model, tag_model, device, tag_model_pos_weight=None):
-    optimizer = build_tag_optimizer(
-        optimizer_name=config["optimizer"],
-        tag_model=tag_model,
-        bert_model=bert_model,
-        tag_lr=config["tag_learning_rate_tag"],
-        bert_lr=config["bert_learning_rate_tag"],
-        optimizer_config=config.get("optimizer_config", {}),
-    )
-
-    
-    models_with_names = [
-        ("bert_model", bert_model),
-        ("tag_model", tag_model)
-    ]
-
-    print_models_param_summary(models_with_names, optimizer)
-
-    print_separator()
-
-    loss_tag_fn = get_loss_tag_fn(
-        config=config,
-        device=device,
-        tag_model_pos_weight=tag_model_pos_weight
-    )
-
-    return optimizer, loss_tag_fn
-
-def build_training_components_multitask(config, bert_model, synergy_model, device, tag_model, tag_projector_model, tag_model_pos_weight=1.0, synergy_model_pos_weight=1.0):
-    optimizer = build_multitask_optimizer(
-        bert_model=bert_model,
-        synergy_model=synergy_model,
-        tag_projector_model=tag_projector_model,
-        tag_model=tag_model,
-        bert_lr=config["bert_learning_rate_multi"],
-        synergy_lr=config["synergy_learning_rate"],
-        tag_projector_lr=config["tag_projector_learning_rate"],
-        tag_lr= config["tag_learning_rate_multi"],
-        optimizer_config=config.get("optimizer_config", {}),
-        optimizer_name=config.get("optimizer")
-    )
-
-    models_with_names = [
-        ("bert_model", bert_model),
-        ("synergy_model", synergy_model),
-        ("tag_projector_model", tag_projector_model),
-        ("tag_model", tag_model)
-    ]
-
-    print_models_param_summary(models_with_names, optimizer)
-
-    print_separator()
-
-    loss_fn = nn.BCEWithLogitsLoss(
-        pos_weight=synergy_model_pos_weight
-    ).to(device)
-
-    print("Using BCEWithLogitsLoss for synergy model with pos_weight:", synergy_model_pos_weight)
-
-    print_separator()
-
-    loss_tag_fn = get_loss_tag_fn(
-        config=config,
-        device=device,
-        tag_model_pos_weight=tag_model_pos_weight
-    )
-
-    return optimizer, loss_fn, loss_tag_fn
-
-def build_multitask_optimizer(
-    optimizer_name, bert_model, synergy_model, tag_projector_model, bert_lr, tag_projector_lr ,synergy_lr, optimizer_config, tag_model, tag_lr
-):
-    param_groups = [
-        {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
-        {"params": synergy_model.parameters(), "lr": synergy_lr, "name": "synergy_model"},
-        {"params": tag_projector_model.parameters(), "lr": tag_projector_lr, "name": "tag_projector_model"},
-        {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"}
-    ]
-
-    if optimizer_name == "Adam":
-        return optim.Adam(param_groups, **optimizer_config)
-    elif optimizer_name == "AdamW":
-        return optim.AdamW(param_groups, **optimizer_config)
-    elif optimizer_name == "SGD":
-        return optim.SGD(param_groups, **optimizer_config)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
-    
-def build_tag_optimizer(
-    optimizer_name, tag_model, bert_model, tag_lr, bert_lr, optimizer_config
-):
-    param_groups = [
-        {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
-        {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
-    ]
-
-    if optimizer_name == "Adam":
-        return optim.Adam(param_groups, **optimizer_config)
-    elif optimizer_name == "AdamW":
-        return optim.AdamW(param_groups, **optimizer_config)
-    elif optimizer_name == "SGD":
-        return optim.SGD(param_groups, **optimizer_config)
-    else:
-        raise ValueError(f"Unsupported optimizer: {optimizer_name}")
+from mtgProject.src.training_utils.multi_utils import build_training_components_multitask, create_dataloaders_multi
+from mtgProject.src.training_utils.tag_utils import build_training_components_tag
 
 def get_embeddings_and_tag_preds(
     bert_model, tag_model, tag_projector_model, batch, device
@@ -333,7 +201,7 @@ def train_multitask_loop(
 
             # full_loss = weighted_loss_synergy + tag_loss_weight * tag_loss
             loss_scaler = LossScaler()
-            full_loss, scale_factor = loss_scaler.get_scaled_total_loss(tag_loss, weighted_loss_synergy)
+            full_loss, scale_factor = loss_scaler.get_scaled_total_loss(tag_loss, weighted_loss_synergy, alpha=tag_loss_weight)
             loss_scaled = full_loss / accumulation_steps
 
         scaler.scale(loss_scaled).backward()
@@ -425,36 +293,6 @@ def eval_multitask_loop(
 
     log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_loss,
                 all_preds_synergy, all_labels_synergy, all_preds_tag, all_labels_tag, label)
-
-def create_dataloaders_multi(config, tokenizer, index_splits):
-
-    # Create DataLoaders
-    dataloaders = {}
-    for split_name, indices in index_splits.items():
-        dataset = JointCardDataset(
-            config["synergy_file"],
-            config["bulk_file"],
-            tokenizer,
-            max_length=config["max_length_bert_tokenizer"],
-            tags_len=config.get("tag_output_dim", None),
-            subset_indices=indices,
-            dataset_name=split_name,
-            debug_dataset=True,
-            tag_to_index_file=config.get("tag_to_index_file", None),
-        )
-
-        is_train = split_name == "train"
-        dataloaders[split_name] = DataLoader(
-            dataset,
-            batch_size=config["batch_size"],
-            shuffle=is_train,
-            drop_last=True,
-            num_workers=2,
-            pin_memory=True,
-            prefetch_factor=2 if is_train else None,
-        )
-
-    return dataloaders
 
 def train_tag_model(config, writer, save_full_dir, bert_model, tag_model, tokenizer, device, start_epoch):
 

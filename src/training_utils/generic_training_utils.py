@@ -174,4 +174,33 @@ def split_indices(real_indices, fake_indices, splits, log_splits=False):
 
     return final_splits
 
+def get_loss_tag_fn(
+    config, device, tag_model_pos_weight=None
+):
+    """
+    Build the loss function for the tag model based on the configuration.
+    If use_focal is True, use FocalLoss; otherwise, use weighted BCE.
+    """
+    if config.get("use_focal", False):
+        # Use FocalLoss, normalize alpha if provided
+        if tag_model_pos_weight is not None:
+            alpha = tag_model_pos_weight / tag_model_pos_weight.max()  # Normalize to 0–1
+        else:
+            alpha = None
+
+        loss_tag_fn = FocalLoss(
+            alpha=alpha,
+            gamma=config.get("focal_gamma", 2.0)
+        ).to(device)
+
+        print("Using Focal Loss for tag model with alpha:", alpha, "and gamma:", config.get("focal_gamma", 2.0))
+
+    else:
+        # Use weighted BCE
+        loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
+        print("Using weighted BCE Loss for tag model with pos_weight:", tag_model_pos_weight)
+
+    return loss_tag_fn
+
+
 
