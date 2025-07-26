@@ -4,8 +4,8 @@ import json
 from tqdm import tqdm
 import random
 
-from mtgProject.src.models.synergy_model import ModelComplex  # your binary model
-from mtgProject.src.models.tag_model import TagModel  # your tag model
+from src.models.synergy_model import ModelComplex  # your binary model
+from src.models.tag_model import TagModel  # your tag model
 
 
 # Configuration
@@ -21,7 +21,7 @@ def load_lookup_cards(path):
     with open(path, "r", encoding="utf-8") as f:
         cards = json.load(f)
     lookup_cards = {}
-    for card in cards:        
+    for card in cards:
         lookup_cards[card["name"]] = card
     return lookup_cards
 
@@ -30,19 +30,27 @@ def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
     model.eval()
     candidates = []
 
-    deck_embeddings = [all_embeddings[name] for name in current_deck if name in all_embeddings]
+    deck_embeddings = [
+        all_embeddings[name] for name in current_deck if name in all_embeddings
+    ]
     if not deck_embeddings:
         raise ValueError("No valid embeddings found for current deck.")
 
     with torch.no_grad():
-        for card_name, emb in tqdm(all_embeddings.items(), desc="Evaluating cards", unit="card"):
+        for card_name, emb in tqdm(
+            all_embeddings.items(), desc="Evaluating cards", unit="card"
+        ):
             if card_name in current_deck:
                 continue  # skip already selected cards
 
             scores = []
             for deck_emb in deck_embeddings:
-                input_emb = torch.cat([deck_emb.unsqueeze(0), emb.unsqueeze(0)], dim=1).to(DEVICE)
-                logit = model(input_emb[:, :EMBEDDING_DIM], input_emb[:, EMBEDDING_DIM:])
+                input_emb = torch.cat(
+                    [deck_emb.unsqueeze(0), emb.unsqueeze(0)], dim=1
+                ).to(DEVICE)
+                logit = model(
+                    input_emb[:, :EMBEDDING_DIM], input_emb[:, EMBEDDING_DIM:]
+                )
                 score = torch.sigmoid(logit).item()
                 scores.append(score)
 
@@ -52,7 +60,10 @@ def recommend_cards(current_deck, all_embeddings, model, top_n=TOP_N):
     candidates.sort(key=lambda x: x[1], reverse=True)
     return candidates[:top_n]
 
-def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, commander_name=None):
+
+def recommend_cards_commander(
+    current_deck, all_cards, model, top_n=TOP_N, commander_name=None
+):
     model.eval()
     candidates = []
 
@@ -63,7 +74,9 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
         if commander_info and "colors" in commander_info:
             allowed_colors = set(commander_info["colors"])
         else:
-            raise ValueError(f"Commander '{commander_name}' not found or missing color info.")
+            raise ValueError(
+                f"Commander '{commander_name}' not found or missing color info."
+            )
 
     # Preprocess deck embeddings and tag projections
     deck_embs, deck_tags = [], []
@@ -81,7 +94,9 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
             continue
 
         if emb.shape[-1] != 384 or tag.shape[-1] != 64:
-            print(f"Skipping {deck_card_name} due to invalid shape: emb={emb.shape}, tag={tag.shape}")
+            print(
+                f"Skipping {deck_card_name} due to invalid shape: emb={emb.shape}, tag={tag.shape}"
+            )
             continue
 
         deck_embs.append(emb)
@@ -90,11 +105,13 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
     if not deck_embs:
         raise ValueError("No valid deck embeddings found.")
 
-    deck_embs_tensor = torch.stack(deck_embs)       # shape: [deck_size, 384]
-    deck_tags_tensor = torch.stack(deck_tags)       # shape: [deck_size, 64]
+    deck_embs_tensor = torch.stack(deck_embs)  # shape: [deck_size, 384]
+    deck_tags_tensor = torch.stack(deck_tags)  # shape: [deck_size, 64]
 
     with torch.no_grad():
-        for card_name, card in tqdm(all_cards.items(), desc="Evaluating cards", unit="card"):
+        for card_name, card in tqdm(
+            all_cards.items(), desc="Evaluating cards", unit="card"
+        ):
             if card_name in current_deck:
                 continue
 
@@ -105,7 +122,9 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
 
             try:
                 emb = torch.tensor(card["emb_predicted"][0], device=DEVICE)
-                tag_proj = torch.tensor(card["tags_preds_projection"][0][0], device=DEVICE)
+                tag_proj = torch.tensor(
+                    card["tags_preds_projection"][0][0], device=DEVICE
+                )
             except (KeyError, IndexError, TypeError):
                 continue
 
@@ -113,11 +132,17 @@ def recommend_cards_commander(current_deck, all_cards, model, top_n=TOP_N, comma
                 continue
 
             # Expand candidate to match deck size for batch inference
-            batch_emb = emb.unsqueeze(0).expand(deck_embs_tensor.size(0), -1)         # [deck_size, 384]
-            batch_tag_proj = tag_proj.unsqueeze(0).expand(deck_tags_tensor.size(0), -1)  # [deck_size, 64]
+            batch_emb = emb.unsqueeze(0).expand(
+                deck_embs_tensor.size(0), -1
+            )  # [deck_size, 384]
+            batch_tag_proj = tag_proj.unsqueeze(0).expand(
+                deck_tags_tensor.size(0), -1
+            )  # [deck_size, 64]
 
             try:
-                logits = model(batch_emb, deck_embs_tensor, deck_tags_tensor, batch_tag_proj)
+                logits = model(
+                    batch_emb, deck_embs_tensor, deck_tags_tensor, batch_tag_proj
+                )
                 if logits is None:
                     continue
 
@@ -144,17 +169,18 @@ def decklist_to_array(decklist):
     Convert a decklist string into a list of card names.
     Each line is expected to start with quantity, followed by card name (with optional set/code info).
     """
-    lines = decklist.strip().split('\n')
+    lines = decklist.strip().split("\n")
     card_names = []
 
     for line in lines:
         # Remove quantity and extract name before set info
-        match = re.match(r'^\d+\s+(.*?)(?:\s+\([A-Z]+\).*|\s+\w+-\d+)?$', line)
+        match = re.match(r"^\d+\s+(.*?)(?:\s+\([A-Z]+\).*|\s+\w+-\d+)?$", line)
         if match:
             name = match.group(1).strip()
             card_names.append(name)
 
     return card_names
+
 
 # def print_tags_from_tag_model(tag_model, card_name, all_cards, all_embeddings):
 #     """
@@ -166,8 +192,6 @@ def decklist_to_array(decklist):
 
 #     emb = all_embeddings[card_name].unsqueeze(0).to(DEVICE)
 #     with torch.no_grad():
-
-
 
 
 if __name__ == "__main__":
@@ -229,7 +253,7 @@ if __name__ == "__main__":
 """
     current_deck = decklist_to_array(deck)
     commander = None
-    #get 30 cards from the deck at random
+    # get 30 cards from the deck at random
     if len(current_deck) > 30:
         current_deck = random.sample(current_deck, 30)
 
@@ -242,7 +266,6 @@ if __name__ == "__main__":
     synergy_model = ModelComplex(EMBEDDING_DIM, TAG_PROJECTOR_OUTPUT_DIM).to(DEVICE)
     synergy_model.load_state_dict(torch.load(SYNERGY_CHECKPOINT_FILE))
     synergy_model.eval()
-
 
     # print(" Recommending cards...")
     # top_recommendations = recommend_cards(current_deck, all_embeddings, synergy_model)

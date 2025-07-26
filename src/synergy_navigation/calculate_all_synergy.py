@@ -4,8 +4,10 @@ import sqlite3
 from tqdm import tqdm
 from math import comb
 
-from mtgProject.src.models.synergy_model import ModelComplex  # Replace with actual import path to your model
-from mtgProject.src.utils.cards_advisor import load_lookup_cards
+from src.models.synergy_model import (
+    ModelComplex,
+)  # Replace with actual import path to your model
+from src.utils.cards_advisor import load_lookup_cards
 
 # === CONFIG ===
 EMBEDDING_DIM = 384
@@ -17,6 +19,7 @@ DB_FILE = "synergy_cache_compressed.sqlite"
 CHUNK_SIZE = 15000
 # ==============
 
+
 def filter_cards(all_cards):
     filtered = {}
     for name, card in all_cards.items():
@@ -25,25 +28,31 @@ def filter_cards(all_cards):
         filtered[name] = card
     return filtered
 
+
 def init_db():
     conn = sqlite3.connect(DB_FILE)
     cur = conn.cursor()
-    cur.execute("""
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS synergies (
             idx_a INTEGER,
             idx_b INTEGER,
             score REAL,
             PRIMARY KEY (idx_a, idx_b)
         );
-    """)
-    cur.execute("""
+    """
+    )
+    cur.execute(
+        """
         CREATE TABLE IF NOT EXISTS meta (
             key TEXT PRIMARY KEY,
             value INTEGER
         );
-    """)
+    """
+    )
     conn.commit()
     return conn
+
 
 def get_last_processed_index(conn):
     cur = conn.cursor()
@@ -51,10 +60,14 @@ def get_last_processed_index(conn):
     row = cur.fetchone()
     return int(row[0]) if row else 0
 
+
 def set_last_processed_index(conn, idx):
     cur = conn.cursor()
-    cur.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ("last_idx_a", idx))
+    cur.execute(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", ("last_idx_a", idx)
+    )
     conn.commit()
+
 
 def batch_pairs(card_count, chunk_size, start_idx=0):
     batch = []
@@ -71,13 +84,16 @@ def batch_pairs(card_count, chunk_size, start_idx=0):
 def count_remaining_pairs(n, start_idx):
     return comb(n - start_idx, 2)
 
+
 def main():
     debug = False
 
     print("🔍 Loading and filtering cards...")
     all_cards_raw = load_lookup_cards(BULK_EMBEDDING_FILE)
     all_cards = filter_cards(all_cards_raw)
-    print(f"✅ Filtered {len(all_cards_raw) - len(all_cards)} cards. Remaining: {len(all_cards)}")
+    print(
+        f"✅ Filtered {len(all_cards_raw) - len(all_cards)} cards. Remaining: {len(all_cards)}"
+    )
 
     card_names = list(all_cards.keys())
     name_to_idx = {name: i for i, name in enumerate(card_names)}
@@ -96,11 +112,19 @@ def main():
     model.eval()
 
     print("⚙️ Caching embeddings on GPU...")
-    emb_dict = {i: torch.tensor(all_cards[name]["emb_predicted"][0], device=DEVICE) for i, name in idx_to_name.items()}
-    tag_dict = {i: torch.tensor(all_cards[name]["tags_preds_projection"][0][0], device=DEVICE) for i, name in idx_to_name.items()}
+    emb_dict = {
+        i: torch.tensor(all_cards[name]["emb_predicted"][0], device=DEVICE)
+        for i, name in idx_to_name.items()
+    }
+    tag_dict = {
+        i: torch.tensor(all_cards[name]["tags_preds_projection"][0][0], device=DEVICE)
+        for i, name in idx_to_name.items()
+    }
 
     remaining_pairs = count_remaining_pairs(n, last_idx)
-    remaining_batches = remaining_pairs // CHUNK_SIZE + (1 if remaining_pairs % CHUNK_SIZE > 0 else 0)
+    remaining_batches = remaining_pairs // CHUNK_SIZE + (
+        1 if remaining_pairs % CHUNK_SIZE > 0 else 0
+    )
     done_pairs = total_possible_pairs - remaining_pairs
     session_pairs = 0  # Pairs processed during this run
 
@@ -116,7 +140,11 @@ def main():
 
     current_i = last_idx
 
-    for batch in tqdm(batch_pairs(n, CHUNK_SIZE, start_idx=last_idx), desc="Processing pairs", total=remaining_batches):
+    for batch in tqdm(
+        batch_pairs(n, CHUNK_SIZE, start_idx=last_idx),
+        desc="Processing pairs",
+        total=remaining_batches,
+    ):
         emb_a_batch = torch.stack([emb_dict[i] for i, j in batch])
         tag_a_batch = torch.stack([tag_dict[i] for i, j in batch])
         emb_b_batch = torch.stack([emb_dict[j] for i, j in batch])
@@ -127,7 +155,10 @@ def main():
             scores = torch.sigmoid(logits).squeeze().cpu().tolist()
 
         for (i, j), score in zip(batch, scores):
-            cur.execute("INSERT OR REPLACE INTO synergies (idx_a, idx_b, score) VALUES (?, ?, ?)", (i, j, score))
+            cur.execute(
+                "INSERT OR REPLACE INTO synergies (idx_a, idx_b, score) VALUES (?, ?, ?)",
+                (i, j, score),
+            )
         conn.commit()
 
         # Checkpoint after batch (based on first i in batch)
@@ -155,6 +186,7 @@ def main():
     print(f"   🔄 Session processed: {session_pairs:,}")
     print(f"   ⏳ Remaining: {remaining_pairs:,}")
     print(f"   📊 Total: {total_possible_pairs:,}\n")
+
 
 if __name__ == "__main__":
     main()

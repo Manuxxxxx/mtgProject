@@ -4,38 +4,45 @@ import os
 from datetime import datetime
 import networkx as nx
 
-import mtgProject.src.utils.conf as conf
+import src.utils.conf as conf
+
 
 def get_card_name_from_set_number(set_code, collector_number, data):
-    
+
     # Iterate through the cards in the JSON data
     for card in data:
-        if card.get('set_code') == set_code and card.get('collector_number') == collector_number:
+        if (
+            card.get("set_code") == set_code
+            and card.get("collector_number") == collector_number
+        ):
             return card
-    
+
     return None
 
+
 def get_tags_from_set_number(set_code, collector_number, tag_data):
-    #get all the tags for a specific set code and collector number
+    # get all the tags for a specific set code and collector number
     return tag_data[set_code][collector_number]
 
+
 def get_all_card_without_duplicate(input_file_processed_json):
-    with open(input_file_processed_json, 'r') as file:
+    with open(input_file_processed_json, "r") as file:
         data = json.load(file)
 
     print(f"Total cards before removing duplicates: {len(data)}")
     # remove duplicates -> same name
     unique_cards = {}
     for card in data:
-        name = card.get('name')
+        name = card.get("name")
         if name not in unique_cards:
             unique_cards[name] = card
     print(f"Total cards after removing duplicates: {len(unique_cards)}")
     return list(unique_cards.values())
 
+
 def add_tag_to_card(card, tag_data, include_tags=None):
-    set_code = card.get('set')
-    collector_number = card.get('collector_number')
+    set_code = card.get("set")
+    collector_number = card.get("collector_number")
 
     # Get the tag from the tag data
     tags = get_tags_from_set_number(set_code, collector_number, tag_data)
@@ -48,12 +55,14 @@ def add_tag_to_card(card, tag_data, include_tags=None):
         card["tags_labels"] = None
     return card
 
+
 def add_tags_to_all_cards(card_data, tag_data, include_tags=None):
     # Add tags to all cards
     for card in card_data:
         card = add_tag_to_card(card, tag_data, include_tags)
-    
+
     return card_data
+
 
 def extract_all_tags(tag_data):
 
@@ -70,13 +79,14 @@ def extract_all_tags(tag_data):
 
     return list(unique_tags)
 
+
 def load_tag_data(input_file_tagger):
     # Load the tag data from the JSON file
-    with open(input_file_tagger, 'r') as file:
+    with open(input_file_tagger, "r") as file:
         tag_data = json.load(file)
 
     smaller_tag_data = {}
-    
+
     for set_code, data in tag_data.items():
         for key, value in data.items():
             if key == "collector_number":
@@ -86,9 +96,9 @@ def load_tag_data(input_file_tagger):
                 tag_name = tag_entry["name"]
                 # Add the tag to the card_tags list
                 card_tags.append(tag_name)
-                #if the tag has a field ancestor append each ancestor to the tags
-                if 'ancestor' in tag_entry:
-                    ancestors = tag_entry['ancestor']
+                # if the tag has a field ancestor append each ancestor to the tags
+                if "ancestor" in tag_entry:
+                    ancestors = tag_entry["ancestor"]
                     if isinstance(ancestors, list):
                         for ancestor in ancestors:
                             if isinstance(ancestor, str):
@@ -101,11 +111,12 @@ def load_tag_data(input_file_tagger):
             smaller_tag_data[set_code][key] = card_tags
     return smaller_tag_data
 
+
 def create_tag_dependency_graph(tag_data):
     """
     Creates a directed tag dependency graph from tag data.
     Nodes are tag names, edges represent 'ancestor' relationships.
-    
+
     Parameters:
         tag_data (dict): Nested dictionary with set_code -> card_id -> metadata including 'functional_tags'.
 
@@ -142,7 +153,6 @@ def create_tag_dependency_graph(tag_data):
     return G
 
 
-
 def extract_all_tags_with_min_freq(tag_data, min_count=20):
     tag_counter = Counter()
 
@@ -153,10 +163,11 @@ def extract_all_tags_with_min_freq(tag_data, min_count=20):
 
     return {tag for tag, count in tag_counter.items() if count >= min_count}
 
+
 def filter_cards_by_sets(card_data, sets_to_include):
     filtered_cards = []
     for card in card_data:
-        if card.get('set') in sets_to_include:
+        if card.get("set") in sets_to_include:
             filtered_cards.append(card)
     return filtered_cards
 
@@ -165,10 +176,10 @@ if __name__ == "__main__":
     MIN_COUNT = 0
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     tag_data = load_tag_data(input_file_tagger)
-    
+
     graph = create_tag_dependency_graph(tag_data)
     nx.draw(graph, with_labels=True)
-    
+
     exit(0)
 
     tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=MIN_COUNT)
@@ -176,21 +187,28 @@ if __name__ == "__main__":
     # print(tag_to_index)
     print(f"Total tags to include: {len(tags_to_include)}")
 
-    input_file_processed_json = "datasets/processed/indent/commander_legal_cards20250630171009.json"
+    input_file_processed_json = (
+        "datasets/processed/indent/commander_legal_cards20250630171009.json"
+    )
 
-    card_data = filter_cards_by_sets(get_all_card_without_duplicate(input_file_processed_json), conf.all_sets)
+    card_data = filter_cards_by_sets(
+        get_all_card_without_duplicate(input_file_processed_json), conf.all_sets
+    )
     print(f"Total cards after set filter: {len(card_data)}")
     card_data = add_tags_to_all_cards(card_data, tag_data, tags_to_include)
     # Save the updated card data to a new JSON file
     os.makedirs(conf.processed_tag_dir, exist_ok=True)
-    time = datetime.now().strftime('%Y%m%d%H%M%S')
-    output_file = os.path.join(conf.processed_tag_dir, f"cards_with_tags_{len(tags_to_include)}_{time}.json")
-    output_file_tag_to_index = os.path.join(conf.processed_tag_dir, f"tag_to_index_{len(tags_to_include)}_{time}.json")
-    with open(output_file, 'w') as f:
+    time = datetime.now().strftime("%Y%m%d%H%M%S")
+    output_file = os.path.join(
+        conf.processed_tag_dir, f"cards_with_tags_{len(tags_to_include)}_{time}.json"
+    )
+    output_file_tag_to_index = os.path.join(
+        conf.processed_tag_dir, f"tag_to_index_{len(tags_to_include)}_{time}.json"
+    )
+    with open(output_file, "w") as f:
         json.dump(card_data, f, indent=2)
-    with open(output_file_tag_to_index, 'w') as f:
+    with open(output_file_tag_to_index, "w") as f:
         json.dump(tag_to_index, f, indent=2)
-    
 
     # all_tags = extract_all_tags(tag_data)
     # print(f"Total tags: {len(all_tags)}")
@@ -204,5 +222,3 @@ if __name__ == "__main__":
     # print(f"Total tags with min count 120: {len(extract_all_tags_with_min_freq(tag_data, min_count=120))}")
     # print(f"Total tags with min count 140: {len(extract_all_tags_with_min_freq(tag_data, min_count=140))}")
     # print(f"Total tags with min count 160: {len(extract_all_tags_with_min_freq(tag_data, min_count=160))}")
-
-

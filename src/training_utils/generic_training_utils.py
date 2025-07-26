@@ -2,7 +2,7 @@ import sys
 import random
 import numpy as np
 import json
-from mtgProject.src.training_utils import bert_parsing
+from src.training_utils import bert_parsing
 
 ANSI_COLORS = {
     "reset": "\033[0m",
@@ -13,7 +13,7 @@ ANSI_COLORS = {
     "magenta": "\033[35m",
     "cyan": "\033[36m",
     "white": "\033[37m",
-    "bold": "\033[1m"
+    "bold": "\033[1m",
 }
 
 # Store original stdout
@@ -21,6 +21,7 @@ original_write = sys.stdout.write
 
 # Current color state
 current_color = ""
+
 
 def set_color(color_name=None):
     """
@@ -35,31 +36,43 @@ def set_color(color_name=None):
         color_code = ANSI_COLORS.get(color_name.lower())
         if not color_code:
             raise ValueError(f"Unknown color: {color_name}")
-        
+
         current_color = color_code
 
         def color_write(text):
-            original_write(color_code + text + ANSI_COLORS["reset"] if text.strip() else text)
+            original_write(
+                color_code + text + ANSI_COLORS["reset"] if text.strip() else text
+            )
 
         sys.stdout.write = color_write
-        
+
+
 def calculate_stats_lenght_tokenizer_and_plot(tokenizer, cards, max_length=450):
     """
     Calculate the average and max length of tokenized cards using the provided tokenizer.
     Plots all the lengths in a graph.
-    
+
     Args:
         tokenizer: The tokenizer to use for tokenization.
         cards (list): List of card dictionaries to tokenize.
         max_length (int): Maximum length for tokenization.
-        
+
     Returns:
         None: This function does not return anything, but it will plot a histogram of token lengths.
     """
-    #plot histogram of lengths and save it
+    # plot histogram of lengths and save it
     import matplotlib.pyplot as plt
 
-    tokenized_lengths = [len(tokenizer(bert_parsing.format_card_for_bert(card), truncation=True, max_length=max_length)["input_ids"]) for card in cards]
+    tokenized_lengths = [
+        len(
+            tokenizer(
+                bert_parsing.format_card_for_bert(card),
+                truncation=True,
+                max_length=max_length,
+            )["input_ids"]
+        )
+        for card in cards
+    ]
     avg_length = np.mean(tokenized_lengths)
     max_length = np.max(tokenized_lengths)
     min_length = np.min(tokenized_lengths)
@@ -67,13 +80,32 @@ def calculate_stats_lenght_tokenizer_and_plot(tokenizer, cards, max_length=450):
     plt.title("Tokenized Lengths Histogram")
     plt.xlabel("Length")
     plt.ylabel("Frequency")
-    plt.axvline(avg_length, color='r', linestyle='dashed', linewidth=1, label=f'Avg Length: {avg_length:.2f}')
-    plt.axvline(max_length, color='g', linestyle='dashed', linewidth=1, label=f'Max Length: {max_length}')
-    plt.axvline(min_length, color='b', linestyle='dashed', linewidth=1, label=f'Min Length: {min_length}')
+    plt.axvline(
+        avg_length,
+        color="r",
+        linestyle="dashed",
+        linewidth=1,
+        label=f"Avg Length: {avg_length:.2f}",
+    )
+    plt.axvline(
+        max_length,
+        color="g",
+        linestyle="dashed",
+        linewidth=1,
+        label=f"Max Length: {max_length}",
+    )
+    plt.axvline(
+        min_length,
+        color="b",
+        linestyle="dashed",
+        linewidth=1,
+        label=f"Min Length: {min_length}",
+    )
     plt.grid(True)
     plt.savefig("tokenized_lengths_histogram.png")
     plt.close()
-    
+
+
 def set_seed(seed: int = 42):
     random.seed(seed)  # Python random module
     # np.random.seed(seed)                   # NumPy
@@ -84,6 +116,7 @@ def set_seed(seed: int = 42):
     # # Ensures deterministic behavior (at the expense of performance)
     # torch.backends.cudnn.deterministic = True
     # torch.backends.cudnn.benchmark = False
+
 
 def get_real_fake_indices(synergy_file):
     """
@@ -105,9 +138,11 @@ def get_real_fake_indices(synergy_file):
 
     return real_indices, fake_indices
 
+
 def print_separator():
     print("=" * 30)
-    
+
+
 def print_models_param_summary(models_with_names, optimizer):
     """
     Args:
@@ -117,9 +152,11 @@ def print_models_param_summary(models_with_names, optimizer):
     print("Optimizer name:", optimizer.__class__.__name__)
     print("Optimizer parameter groups:")
     for param_group in optimizer.param_groups:
-        print(f"  - Learning rate: {param_group['lr']}, "
-              f"Params: {len(param_group['params'])}, "
-              f"Name: {param_group.get('name', 'N/A')}")
+        print(
+            f"  - Learning rate: {param_group['lr']}, "
+            f"Params: {len(param_group['params'])}, "
+            f"Name: {param_group.get('name', 'N/A')}"
+        )
 
     print("\nModel parameter summary:")
     for name, model in models_with_names:
@@ -135,7 +172,8 @@ def print_models_param_summary(models_with_names, optimizer):
         print(f"  - Total parameters: {total_params:,}")
         print(f"  - Trainable parameters: {trainable_params:,}")
         print(f"  - Frozen parameters: {frozen_params:,}")
-        
+
+
 def split_indices(real_indices, fake_indices, splits, log_splits=False):
     random.shuffle(real_indices)
     random.shuffle(fake_indices)
@@ -174,9 +212,8 @@ def split_indices(real_indices, fake_indices, splits, log_splits=False):
 
     return final_splits
 
-def get_loss_tag_fn(
-    config, device, tag_model_pos_weight=None
-):
+
+def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
     """
     Build the loss function for the tag model based on the configuration.
     If use_focal is True, use FocalLoss; otherwise, use weighted BCE.
@@ -184,23 +221,29 @@ def get_loss_tag_fn(
     if config.get("use_focal", False):
         # Use FocalLoss, normalize alpha if provided
         if tag_model_pos_weight is not None:
-            alpha = tag_model_pos_weight / tag_model_pos_weight.max()  # Normalize to 0–1
+            alpha = (
+                tag_model_pos_weight / tag_model_pos_weight.max()
+            )  # Normalize to 0–1
         else:
             alpha = None
 
-        loss_tag_fn = FocalLoss(
-            alpha=alpha,
-            gamma=config.get("focal_gamma", 2.0)
-        ).to(device)
+        loss_tag_fn = FocalLoss(alpha=alpha, gamma=config.get("focal_gamma", 2.0)).to(
+            device
+        )
 
-        print("Using Focal Loss for tag model with alpha:", alpha, "and gamma:", config.get("focal_gamma", 2.0))
+        print(
+            "Using Focal Loss for tag model with alpha:",
+            alpha,
+            "and gamma:",
+            config.get("focal_gamma", 2.0),
+        )
 
     else:
         # Use weighted BCE
         loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
-        print("Using weighted BCE Loss for tag model with pos_weight:", tag_model_pos_weight)
+        print(
+            "Using weighted BCE Loss for tag model with pos_weight:",
+            tag_model_pos_weight,
+        )
 
     return loss_tag_fn
-
-
-

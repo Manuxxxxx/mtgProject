@@ -5,11 +5,20 @@ from torch.utils.data import Dataset, DataLoader
 import json
 import numpy as np
 
-from mtgProject.src.training_utils import bert_parsing
+from src.training_utils import bert_parsing
+
 
 class CardDataset(Dataset):
-    def __init__(self, card_data, tokenizer, max_length=320, tags_len=None, dataset_name="tag", tag_to_index_file=None):
-        
+    def __init__(
+        self,
+        card_data,
+        tokenizer,
+        max_length=320,
+        tags_len=None,
+        dataset_name="tag",
+        tag_to_index_file=None,
+    ):
+
         self.tokenizer = tokenizer
         self.data = card_data
         self.max_length = max_length
@@ -18,7 +27,6 @@ class CardDataset(Dataset):
         if tag_to_index_file is not None:
             with open(tag_to_index_file, "r") as f:
                 self.tag_to_index = json.load(f)
-    
 
         if tags_len is not None:
             if tag_to_index_file is None:
@@ -27,13 +35,12 @@ class CardDataset(Dataset):
                     if "tags" in card and card["tags"]:
                         all_tags.update(card["tags"])
 
-            
                 self.tag_to_index = {tag: i for i, tag in enumerate(all_tags)}
                 if len(self.tag_to_index) != tags_len:
                     raise ValueError(
                         f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                     )
-            
+
             self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
             self.total_tag_samples = 0
 
@@ -42,9 +49,8 @@ class CardDataset(Dataset):
                 if tag_vec.shape[0] == self.tags_len:
                     self.tag_counts += tag_vec
                     self.total_tag_samples += 1
-                
-                card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
 
+                card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
 
     def __len__(self):
         return len(self.data)
@@ -59,11 +65,11 @@ class CardDataset(Dataset):
             return_tensors="pt",
         )
         return {
-            "input_ids": inputs['input_ids'].squeeze(0),
-            "attention_mask": inputs['attention_mask'].squeeze(0),
+            "input_ids": inputs["input_ids"].squeeze(0),
+            "attention_mask": inputs["attention_mask"].squeeze(0),
             "tag_hot": card.get("tag_hot"),  # Add tag hot encoding to card data
         }
-    
+
     def hot_encode_tags(self, card):
         """
         Convert card tags to a one-hot encoded vector.
@@ -72,11 +78,9 @@ class CardDataset(Dataset):
             return torch.zeros(0, dtype=torch.float32)
         if "tags" not in card or not card["tags"]:
             return torch.zeros(self.tags_len, dtype=torch.float32)
-        
-        
+
         tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
-        
-        
+
         for tag in card["tags"]:
             if tag in self.tag_to_index:
                 tag_vector[self.tag_to_index[tag]] = 1.0
@@ -84,14 +88,26 @@ class CardDataset(Dataset):
                 raise ValueError(
                     f"Tag '{tag}' not found in tag_to_index mapping. Available tags: {', '.join(self.tag_to_index.keys())}"
                 )
-        
+
         return torch.tensor(tag_vector, dtype=torch.float32)
+
 
 # ------------------------
 # Combined Dataset
 # ------------------------
 class JointCardDataset(Dataset):
-    def __init__(self, synergy_data, card_data, tokenizer, max_length=320, tags_len=None, subset_indices=None, dataset_name="joint", debug_dataset=False, tag_to_index_file=None):
+    def __init__(
+        self,
+        synergy_data,
+        card_data,
+        tokenizer,
+        max_length=320,
+        tags_len=None,
+        subset_indices=None,
+        dataset_name="joint",
+        debug_dataset=False,
+        tag_to_index_file=None,
+    ):
         synergy_data = json.load(open(synergy_data, "r"))
         card_data = json.load(open(card_data, "r"))
 
@@ -108,7 +124,7 @@ class JointCardDataset(Dataset):
         if tag_to_index_file is not None:
             with open(tag_to_index_file, "r") as f:
                 self.tag_to_index = json.load(f)
-        
+
         if tags_len is not None:
             if tag_to_index_file is None:
                 # If no tag_to_index_file is provided, build the tag_to_index from the synergy data
@@ -122,7 +138,7 @@ class JointCardDataset(Dataset):
                     raise ValueError(
                         f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                     )
-            
+
             self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
             self.total_tag_samples = 0
 
@@ -134,21 +150,18 @@ class JointCardDataset(Dataset):
                         if tag_vec.shape[0] == self.tags_len:
                             self.tag_counts += tag_vec
                             self.total_tag_samples += 1
-                        
-                        card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
 
+                        card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
 
         self.calculate_synergy_counts()
         if debug_dataset:
             self.print_synergy()
 
-
-
     def __len__(self):
         return len(self.synergy_data)
-    
+
     def calculate_synergy_counts(self):
-        self.counts = [0,0,0,0]
+        self.counts = [0, 0, 0, 0]
         for synergy in self.synergy_data:
             if "synergy_edhrec" in synergy:
                 if synergy.get("synergy", 0) == 1:
@@ -161,12 +174,13 @@ class JointCardDataset(Dataset):
                 self.counts[3] += 1
 
     def print_synergy(self):
-        print(f"Dataset {self.dataset_name} counts: "
-                f"Real Syn=1: {self.counts[0]}, "
-                f"Real Syn=0: {self.counts[1]}, "
-                f"Fake Syn=1: {self.counts[2]}, "  
-                f"Fake Syn=0: {self.counts[3]}"
-    )
+        print(
+            f"Dataset {self.dataset_name} counts: "
+            f"Real Syn=1: {self.counts[0]}, "
+            f"Real Syn=0: {self.counts[1]}, "
+            f"Fake Syn=1: {self.counts[2]}, "
+            f"Fake Syn=0: {self.counts[3]}"
+        )
 
     def __getitem__(self, idx):
         entry = self.synergy_data[idx]
@@ -208,7 +222,6 @@ class JointCardDataset(Dataset):
             raise ValueError(
                 f"Missing tag hot encoding for cards: {card1['name']} or {card2['name']}"
             )
-        
 
         return {
             "input_ids1": inputs1["input_ids"].squeeze(0),
@@ -219,7 +232,7 @@ class JointCardDataset(Dataset):
             "tag_hot1": tag_hot1,
             "tag_hot2": tag_hot2,
         }
-    
+
     def hot_encode_tags(self, card):
         """
         Convert card tags to a one-hot encoded vector.
@@ -228,11 +241,9 @@ class JointCardDataset(Dataset):
             return torch.zeros(0, dtype=torch.float32)
         if "tags" not in card or not card["tags"]:
             return torch.zeros(self.tags_len, dtype=torch.float32)
-        
-        
+
         tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
-        
-        
+
         for tag in card["tags"]:
             if tag in self.tag_to_index:
                 tag_vector[self.tag_to_index[tag]] = 1.0
@@ -240,7 +251,7 @@ class JointCardDataset(Dataset):
                 raise ValueError(
                     f"Tag '{tag}' not found in tag_to_index mapping. Available tags: {', '.join(self.tag_to_index.keys())}"
                 )
-        
+
         return torch.tensor(tag_vector, dtype=torch.float32)
 
     def find_card_by_name(self, name):

@@ -1,11 +1,24 @@
 import torch.nn as nn
 import torch.optim as optim
 
-from mtgProject.src.training_utils.datasets import JointCardDataset
-from mtgProject.src.training_utils.generic_training_utils import print_separator, print_models_param_summary, get_loss_tag_fn
+from src.training_utils.datasets import JointCardDataset
+from src.training_utils.generic_training_utils import (
+    print_separator,
+    print_models_param_summary,
+    get_loss_tag_fn,
+)
 
 
-def build_training_components_multitask(config, bert_model, synergy_model, device, tag_model, tag_projector_model, tag_model_pos_weight=1.0, synergy_model_pos_weight=1.0):
+def build_training_components_multitask(
+    config,
+    bert_model,
+    synergy_model,
+    device,
+    tag_model,
+    tag_projector_model,
+    tag_model_pos_weight=1.0,
+    synergy_model_pos_weight=1.0,
+):
     optimizer = build_multitask_optimizer(
         bert_model=bert_model,
         synergy_model=synergy_model,
@@ -14,46 +27,63 @@ def build_training_components_multitask(config, bert_model, synergy_model, devic
         bert_lr=config["bert_learning_rate_multi"],
         synergy_lr=config["synergy_learning_rate"],
         tag_projector_lr=config["tag_projector_learning_rate"],
-        tag_lr= config["tag_learning_rate_multi"],
+        tag_lr=config["tag_learning_rate_multi"],
         optimizer_config=config.get("optimizer_config", {}),
-        optimizer_name=config.get("optimizer")
+        optimizer_name=config.get("optimizer"),
     )
 
     models_with_names = [
         ("bert_model", bert_model),
         ("synergy_model", synergy_model),
         ("tag_projector_model", tag_projector_model),
-        ("tag_model", tag_model)
+        ("tag_model", tag_model),
     ]
 
     print_models_param_summary(models_with_names, optimizer)
 
     print_separator()
 
-    loss_fn = nn.BCEWithLogitsLoss(
-        pos_weight=synergy_model_pos_weight
-    ).to(device)
+    loss_fn = nn.BCEWithLogitsLoss(pos_weight=synergy_model_pos_weight).to(device)
 
-    print("Using BCEWithLogitsLoss for synergy model with pos_weight:", synergy_model_pos_weight)
+    print(
+        "Using BCEWithLogitsLoss for synergy model with pos_weight:",
+        synergy_model_pos_weight,
+    )
 
     print_separator()
 
     loss_tag_fn = get_loss_tag_fn(
-        config=config,
-        device=device,
-        tag_model_pos_weight=tag_model_pos_weight
+        config=config, device=device, tag_model_pos_weight=tag_model_pos_weight
     )
 
     return optimizer, loss_fn, loss_tag_fn
 
+
 def build_multitask_optimizer(
-    optimizer_name, bert_model, synergy_model, tag_projector_model, bert_lr, tag_projector_lr ,synergy_lr, optimizer_config, tag_model, tag_lr
+    optimizer_name,
+    bert_model,
+    synergy_model,
+    tag_projector_model,
+    bert_lr,
+    tag_projector_lr,
+    synergy_lr,
+    optimizer_config,
+    tag_model,
+    tag_lr,
 ):
     param_groups = [
         {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
-        {"params": synergy_model.parameters(), "lr": synergy_lr, "name": "synergy_model"},
-        {"params": tag_projector_model.parameters(), "lr": tag_projector_lr, "name": "tag_projector_model"},
-        {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"}
+        {
+            "params": synergy_model.parameters(),
+            "lr": synergy_lr,
+            "name": "synergy_model",
+        },
+        {
+            "params": tag_projector_model.parameters(),
+            "lr": tag_projector_lr,
+            "name": "tag_projector_model",
+        },
+        {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
     ]
 
     if optimizer_name == "Adam":
@@ -64,9 +94,10 @@ def build_multitask_optimizer(
         return optim.SGD(param_groups, **optimizer_config)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
-    
+
+
 def create_dataloaders_multi(config, tokenizer, index_splits):
-    
+
     # Create DataLoaders
     dataloaders = {}
     for split_name, indices in index_splits.items():

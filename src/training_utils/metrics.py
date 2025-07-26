@@ -121,9 +121,7 @@ def setup_dirs_writer(config):
     
     return writer, save_full_dir, start_epoch
 
-def update_metrics_multi(calc_metrics, all_preds_synergy, all_labels_synergy, all_preds_tag, all_labels_tag, preds_synergy, labels_synergy, preds_tag1, preds_tag2, tag_hot1, tag_hot2):
-    if not calc_metrics:
-        return
+def update_metrics_multi(all_preds_synergy, all_labels_synergy, all_preds_tag, all_labels_tag, preds_synergy, labels_synergy, preds_tag1, preds_tag2, tag_hot1, tag_hot2):
     all_preds_synergy.extend(preds_synergy.cpu().numpy())
     all_labels_synergy.extend(labels_synergy.cpu().numpy().astype(int))
     all_preds_tag.extend(preds_tag1.detach().cpu().numpy())
