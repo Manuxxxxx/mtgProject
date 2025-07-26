@@ -18,7 +18,7 @@ from mtgProject.src.models.bert_model import build_bert_model
 from mtgProject.src.models.synergy_model import build_synergy_model, calculate_synergy_weighted_FP_loss
 from mtgProject.src.models.tag_projector_model import build_tag_projector_model
 
-from mtgProject.src.training_utils.generic_training_utils import set_color, calculate_stats_lenght_tokenizer_&_plot, set_seed, print_separator, get_real_fake_indices, print_models_param_summary, split_indices
+from mtgProject.src.training_utils.generic_training_utils import set_color, calculate_stats_lenght_tokenizer_and_plot, set_seed, print_separator, get_real_fake_indices, print_models_param_summary, split_indices
 from mtgProject.src.training_utils.loss_scaler import LossScaler
 from mtgProject.src.training_utils.datasets import CardDataset, JointCardDataset
 from mtgProject.src.training_utils.metrics import log_metrics_multitask, log_metrics_tag, setup_dirs_writer, update_metrics_multi
