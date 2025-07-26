@@ -173,8 +173,8 @@ def get_embeddings_and_tag_preds(
     preds_tag1 = torch.sigmoid(tags_pred1)
     preds_tag2 = torch.sigmoid(tags_pred2)
 
-    projected_tag_embed1 = tag_projector_model(preds_tag1)
-    projected_tag_embed2 = tag_projector_model(preds_tag2)
+    projected_tag_embed1 = tag_projector_model(preds_tag1.detach())
+    projected_tag_embed2 = tag_projector_model(preds_tag2.detach())
 
     return embed1, embed2, tags_pred1, tags_pred2, preds_tag1, preds_tag2, projected_tag_embed1, projected_tag_embed2
 
