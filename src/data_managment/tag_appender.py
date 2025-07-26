@@ -1,8 +1,10 @@
 import json
 from typing import Counter
-import mtgProject.src.utils.conf as conf
 import os
 from datetime import datetime
+import networkx as nx
+
+import mtgProject.src.utils.conf as conf
 
 def get_card_name_from_set_number(set_code, collector_number, data):
     
@@ -98,8 +100,47 @@ def load_tag_data(input_file_tagger):
 
             smaller_tag_data[set_code][key] = card_tags
     return smaller_tag_data
-                        
-                            
+
+def create_tag_dependency_graph(tag_data):
+    """
+    Creates a directed tag dependency graph from tag data.
+    Nodes are tag names, edges represent 'ancestor' relationships.
+    
+    Parameters:
+        tag_data (dict): Nested dictionary with set_code -> card_id -> metadata including 'functional_tags'.
+
+    Returns:
+        networkx.DiGraph: A directed graph with tags as nodes and edges as parent-child relationships.
+    """
+    G = nx.DiGraph()
+
+    for set_code, cards in tag_data.items():
+        for card_id, data in cards.items():
+            if card_id == "collector_number":
+                continue
+
+            functional_tags = data.get("functional_tags", [])
+            for tag_entry in functional_tags:
+                tag_name = tag_entry.get("name")
+                if not tag_name:
+                    continue
+
+                # Ensure tag exists as a node
+                G.add_node(tag_name)
+
+                # Add ancestors as edges: ancestor -> tag
+                ancestors = tag_entry.get("ancestor")
+                if isinstance(ancestors, list):
+                    for ancestor in ancestors:
+                        if isinstance(ancestor, str):
+                            G.add_node(ancestor)
+                            G.add_edge(ancestor, tag_name)
+                elif isinstance(ancestors, str):
+                    G.add_node(ancestors)
+                    G.add_edge(ancestors, tag_name)
+
+    return G
+
 
 
 def extract_all_tags_with_min_freq(tag_data, min_count=20):
@@ -121,10 +162,16 @@ def filter_cards_by_sets(card_data, sets_to_include):
 
 
 if __name__ == "__main__":
+    MIN_COUNT = 0
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     tag_data = load_tag_data(input_file_tagger)
+    
+    graph = create_tag_dependency_graph(tag_data)
+    nx.draw(graph, with_labels=True)
+    
+    exit(0)
 
-    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=0)
+    tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=MIN_COUNT)
     tag_to_index = {tag: idx for idx, tag in enumerate(tags_to_include)}
     # print(tag_to_index)
     print(f"Total tags to include: {len(tags_to_include)}")

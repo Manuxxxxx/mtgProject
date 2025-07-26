@@ -1,8 +1,9 @@
 import json
 from typing import Counter
-import mtgProject.src.utils.conf as conf
 import os
 from datetime import datetime
+
+import mtgProject.src.utils.conf as conf
 
 
 def append_field_from_bulk_to_processed(bulk_file, processed_file, fields_to_append=None):

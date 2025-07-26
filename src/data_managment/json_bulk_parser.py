@@ -213,7 +213,6 @@ def filter_commander_legal_cards_and_process(
     except Exception as e:
         print(f"An error occurred: {str(e)}")
 
-
 def save_cards(cards, output_file, output_dir, indent_bol=True):
     """
     Save the filtered cards to a new JSON file.
@@ -257,9 +256,6 @@ def extract_all_sets(bulk_data):
         sets.add(card.get("set"))
 
     return list(sets)
-
-    
-
 
 if __name__ == "__main__":
     date = time.strftime("%Y%m%d%H%M%S")

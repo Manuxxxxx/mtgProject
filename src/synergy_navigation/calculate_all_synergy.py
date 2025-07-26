@@ -2,9 +2,10 @@ import json
 import torch
 import sqlite3
 from tqdm import tqdm
+from math import comb
+
 from mtgProject.src.models.synergy_model import ModelComplex  # Replace with actual import path to your model
 from mtgProject.src.utils.cards_advisor import load_lookup_cards
-from math import comb
 
 # === CONFIG ===
 EMBEDDING_DIM = 384

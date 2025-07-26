@@ -2,8 +2,8 @@ import json
 import os
 from time import sleep
 from pyedhrec import EDHRec
-import mtgProject.src.utils.conf as conf
 import re
+import mtgProject.src.utils.conf as conf
 
 
 def get_commander_data(card_name, debug=False):
