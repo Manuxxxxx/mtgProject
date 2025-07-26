@@ -1,5 +1,5 @@
 import json
-import conf
+import mtgProject.src.utils.conf as conf
 
 def format_card_for_bert(card):
     """

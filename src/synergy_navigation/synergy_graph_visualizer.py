@@ -5,9 +5,9 @@ import sqlite3
 from functools import lru_cache
 from flask import Flask, render_template, request, jsonify
 import umap
-from cards_advisor import load_lookup_cards
-from calculate_all_synergy import filter_cards
-import conf
+from mtgProject.src.utils.cards_advisor import load_lookup_cards
+from mtgProject.src.synergy_navigation.calculate_all_synergy import filter_cards
+import mtgProject.src.utils.conf as conf
 
 def load_or_compute_umap(all_cards, card_names, umap_file_path="umap_coords.npy", n_components=2, bert=False):
     if os.path.exists(umap_file_path):

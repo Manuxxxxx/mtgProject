@@ -1,8 +1,8 @@
 import re
 import torch
 import json
-from synergy_model import ModelComplex  # your binary model
-from tag_model import TagModel  # your tag model
+from mtgProject.src.models.synergy_model import ModelComplex  # your binary model
+from mtgProject.src.models.tag_model import TagModel  # your tag model
 from tqdm import tqdm
 import random
 

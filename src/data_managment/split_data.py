@@ -1,6 +1,6 @@
 import json
 import random
-import conf
+import mtgProject.src.utils.conf as conf
 
 
 def split_data(input_file,save_dir, train_split_dim = 0.8, test_split_dim=0.1):

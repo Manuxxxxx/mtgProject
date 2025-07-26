@@ -1,6 +1,6 @@
 import json
 from typing import Counter
-import conf
+import mtgProject.src.utils.conf as conf
 import os
 from datetime import datetime
 

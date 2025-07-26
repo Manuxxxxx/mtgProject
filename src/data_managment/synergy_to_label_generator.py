@@ -3,10 +3,13 @@ import re
 import time
 import torch
 import json
-from synergy_model import ModelComplex  # your binary model
+from mtgProject.src.models.synergy_model import ModelComplex  # your binary model
 from tqdm import tqdm
 import random
-from cards_advisor import load_embeddings_cards, recommend_cards
+from mtgProject.src.utils.cards_advisor import load_embeddings_cards, recommend_cards
+
+# Load the model and predict synergies for cards that are not labeled yet.
+# Saves the predicted synergies to a file, in order to label them later.
 
 # Configuration
 EMBEDDING_DIM = 384

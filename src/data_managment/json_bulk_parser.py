@@ -1,6 +1,6 @@
 import json
 import time
-import conf
+import mtgProject.src.utils.conf as conf
 
 
 def print_all_layouts(cards):

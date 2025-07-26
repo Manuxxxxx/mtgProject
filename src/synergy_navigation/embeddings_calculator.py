@@ -4,10 +4,10 @@ import re
 import torch
 import time
 from tqdm import tqdm
-import bert_parsing
-from bert_model import build_bert_model
-from tag_model import build_tag_model
-from tag_projector_model import build_tag_projector_model
+import mtgProject.src.utils.bert_parsing as bert_parsing
+from mtgProject.src.models.bert_model import build_bert_model
+from mtgProject.src.models.tag_model import build_tag_model
+from mtgProject.src.models.tag_projector_model import build_tag_projector_model
 
 
 BERT_MODEL_NAME = "distilbert-base-uncased"

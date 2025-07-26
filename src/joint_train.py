@@ -15,13 +15,13 @@ from torch.amp import autocast, GradScaler
 import shutil
 from transformers import get_linear_schedule_with_warmup
 
-from focal_loss import FocalLoss
-from tag_model import  build_tag_model
-from bert_model import build_bert_model
-from synergy_model import build_synergy_model, calculate_weighted_loss
-from tag_projector_model import build_tag_projector_model
+from mtgProject.src.models.losses.focal_loss import FocalLoss
+from mtgProject.src.models.tag_model import  build_tag_model
+from mtgProject.src.models.bert_model import build_bert_model
+from mtgProject.src.models.synergy_model import build_synergy_model, calculate_weighted_loss
+from mtgProject.src.models.tag_projector_model import build_tag_projector_model
 
-import bert_parsing
+import mtgProject.src.utils.bert_parsing as bert_parsing
 
 ANSI_COLORS = {
     "reset": "\033[0m",

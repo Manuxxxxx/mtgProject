@@ -2,7 +2,7 @@ import json
 import os
 from time import sleep
 from pyedhrec import EDHRec
-import conf
+import mtgProject.src.utils.conf as conf
 import re
 
 

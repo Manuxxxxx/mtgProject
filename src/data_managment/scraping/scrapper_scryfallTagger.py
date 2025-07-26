@@ -3,7 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
 
-import conf
+import mtgProject.src.utils.conf as conf
 
 BASE_URL = "https://tagger.scryfall.com"
 
