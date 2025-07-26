@@ -54,6 +54,36 @@ class ModelComplex(nn.Module):
     def forward(self, embed1, embed2, tag_projector1, tag_projector2):
         x = torch.cat([embed1, embed2, embed1 * embed2, torch.abs(embed1 - embed2), tag_projector1, tag_projector2, tag_projector1 * tag_projector2, torch.abs(tag_projector1 - tag_projector2)], dim=-1)
         return self.net(x)
+    
+class ModelComplexSymmetrical(nn.Module):
+    def __init__(self, embedding_dim, tag_projector_dim):
+        super().__init__()
+        input_dim = 3 * embedding_dim + 3 * tag_projector_dim  # embed1, embed2, embed1*embed2, abs(embed1-embed2), tag_projector1, tag_projector2, tag_projector1*tag_projector2, abs(tag_projector1-tag_projector2)
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 256),
+            nn.BatchNorm1d(256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(256, 64),
+            nn.ReLU(),
+            nn.Linear(64, 1)
+            # Removed Sigmoid here too
+        )
+
+    def forward(self, embed1, embed2, tag_projector1, tag_projector2):
+        x = torch.cat([
+            embed1 + embed2,
+            embed1 * embed2,
+            torch.abs(embed1 - embed2),
+            tag_projector1 + tag_projector2,
+            tag_projector1 * tag_projector2,
+            torch.abs(tag_projector1 - tag_projector2),
+        ], dim=-1)
+        return self.net(x)
 
 
 # ----------------------
@@ -72,14 +102,19 @@ def init_weights(m):
 # ----------------------
 # Model Factory
 # ----------------------
-def build_synergy_model(arch_name, embedding_dim, tag_projector_dim):
+def build_synergy_model(arch_name, embedding_dim, tag_projector_dim, initialize_weights=True):
     if arch_name == "modelSimple":
         model = ModelSimple(embedding_dim)
     elif arch_name == "modelComplex":
         model = ModelComplex(embedding_dim, tag_projector_dim)
+    elif arch_name == "modelComplexSymmetrical":
+        model = ModelComplexSymmetrical(embedding_dim, tag_projector_dim)
     else:
         raise ValueError(f"Unknown model architecture: {arch_name}")
-    model.apply(init_weights)
+    
+    if initialize_weights:
+        model.apply(init_weights)
+        
     return model
 
 # ----------------------

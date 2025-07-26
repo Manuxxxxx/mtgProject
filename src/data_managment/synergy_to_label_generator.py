@@ -3,7 +3,7 @@ import re
 import time
 import torch
 import json
-from mtgProject.src.models.synergy_model import ModelComplex  # your binary model
+from mtgProject.src.models.synergy_model import build_synergy_model
 from tqdm import tqdm
 import random
 from mtgProject.src.utils.cards_advisor import load_embeddings_cards, recommend_cards
@@ -17,6 +17,7 @@ SYNERGY_CHECKPOINT_FILE = "checkpoints/joint_training_tag/complexSin_distilbert_
 BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_20250622170831_withuri.json"
 SYNERGY_FILE = "edhrec_data/labeled/with_random/random_real_synergies.json"
 SYNERGY_TO_LABEL_DIR = "synergy_to_label/"
+SYNERGY_MODEL_ARCH = "modelComplexSymmetrical"  # Options: "modelSimple", "modelComplex", "modelComplexSymmetrical"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def load_synergy(path):
@@ -75,7 +76,7 @@ if __name__ == "__main__":
     synergies_hashmap = {f"{synergy['card1']}{synergy['card2']}": synergy for synergy in synergy_labels}
 
     # Load synergy model
-    synergy_model = ModelComplex(EMBEDDING_DIM)
+    synergy_model = build_synergy_model(arch_name=SYNERGY_MODEL_ARCH, embedding_dim=EMBEDDING_DIM, tag_projector_dim=EMBEDDING_DIM, initialize_weights=False)
     synergy_model.load_state_dict(torch.load(SYNERGY_CHECKPOINT_FILE, map_location=DEVICE))
 
     sets_to_include = [
