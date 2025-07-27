@@ -3,6 +3,8 @@ from typing import Counter
 import os
 from datetime import datetime
 import networkx as nx
+import matplotlib.pyplot as plt
+from collections import defaultdict
 
 import src.utils.conf as conf
 
@@ -97,8 +99,8 @@ def load_tag_data(input_file_tagger):
                 # Add the tag to the card_tags list
                 card_tags.append(tag_name)
                 # if the tag has a field ancestor append each ancestor to the tags
-                if "ancestor" in tag_entry:
-                    ancestors = tag_entry["ancestor"]
+                if "ancestors" in tag_entry:
+                    ancestors = tag_entry["ancestors"]
                     if isinstance(ancestors, list):
                         for ancestor in ancestors:
                             if isinstance(ancestor, str):
@@ -112,45 +114,76 @@ def load_tag_data(input_file_tagger):
     return smaller_tag_data
 
 
-def create_tag_dependency_graph(tag_data):
+def create_tag_dependency_graph(input_file_tagger):
     """
     Creates a directed tag dependency graph from tag data.
     Nodes are tag names, edges represent 'ancestor' relationships.
 
     Parameters:
-        tag_data (dict): Nested dictionary with set_code -> card_id -> metadata including 'functional_tags'.
+        input_file_tagger (str): Path to the JSON file containing tag data.
 
     Returns:
         networkx.DiGraph: A directed graph with tags as nodes and edges as parent-child relationships.
     """
-    G = nx.DiGraph()
+    with open(input_file_tagger, "r") as file:
+        tag_data = json.load(file)
 
-    for set_code, cards in tag_data.items():
-        for card_id, data in cards.items():
+    graph = nx.DiGraph()
+
+    print("Creating tag dependency graph...")
+
+    # Track tag usage count and ancestor relationships
+    tag_usage = defaultdict(int)
+    tag_ancestors = defaultdict(set)
+    tag_sources = defaultdict(set)
+
+    for set_code, data in tag_data.items():
+        for card_id, card_data in data.items():
             if card_id == "collector_number":
                 continue
 
-            functional_tags = data.get("functional_tags", [])
-            for tag_entry in functional_tags:
-                tag_name = tag_entry.get("name")
-                if not tag_name:
-                    continue
+            for tag_entry in card_data.get("functional_tags", []):
+                # print(f"Processing tag: {tag_entry['name']} from set {set_code}")
+                tag_name = tag_entry["name"]
+                tag_usage[tag_name] += 1
+                tag_sources[tag_name].add(set_code)
 
-                # Ensure tag exists as a node
-                G.add_node(tag_name)
+                if not graph.has_node(tag_name):
+                    graph.add_node(tag_name, label=tag_name, type="tag")
 
-                # Add ancestors as edges: ancestor -> tag
-                ancestors = tag_entry.get("ancestor")
-                if isinstance(ancestors, list):
-                    for ancestor in ancestors:
-                        if isinstance(ancestor, str):
-                            G.add_node(ancestor)
-                            G.add_edge(ancestor, tag_name)
-                elif isinstance(ancestors, str):
-                    G.add_node(ancestors)
-                    G.add_edge(ancestors, tag_name)
+                # Process ancestors
+                if "ancestors" in tag_entry:
+                    # print("Processing ancestors for tag:", tag_name)
+                    ancestors = tag_entry["ancestors"]
+                    if isinstance(ancestors, list):
+                        for ancestor in ancestors:
+                            if isinstance(ancestor, str):
+                                # print("Adding ancestor:", ancestor)
+                                tag_ancestors[tag_name].add(ancestor)
+                                tag_sources[ancestor].add(set_code)
 
-    return G
+                                # Add ancestor node if missing
+                                if not graph.has_node(ancestor):
+                                    graph.add_node(ancestor, label=ancestor, type="tag")
+
+                                # Add directed edge
+                                graph.add_edge(
+                                    ancestor, tag_name, relationship="inherits"
+                                )
+
+    # Add usage and source metadata
+    for tag in graph.nodes:
+        graph.nodes[tag]["usage_count"] = tag_usage[tag]
+        graph.nodes[tag]["source_sets"] = (
+            ", ".join(sorted(tag_sources[tag])) if tag_sources[tag] else "unknown"
+        )
+        graph.nodes[tag]["is_root"] = str(graph.in_degree(tag) == 0).lower()
+        graph.nodes[tag]["is_leaf"] = str(graph.out_degree(tag) == 0).lower()
+        graph.nodes[tag]["degree"] = graph.degree(tag)
+        graph.nodes[tag]["in_degree"] = graph.in_degree(tag)
+        graph.nodes[tag]["out_degree"] = graph.out_degree(tag)
+
+    return graph
 
 
 def extract_all_tags_with_min_freq(tag_data, min_count=20):
@@ -175,12 +208,16 @@ def filter_cards_by_sets(card_data, sets_to_include):
 if __name__ == "__main__":
     MIN_COUNT = 0
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
-    tag_data = load_tag_data(input_file_tagger)
 
-    graph = create_tag_dependency_graph(tag_data)
-    nx.draw(graph, with_labels=True)
+    graph = create_tag_dependency_graph(input_file_tagger)
+    # nx.draw(graph, with_labels=True)
+    # plt.show()
+    # save the graph to a file
+    nx.write_graphml(graph, "datasets/scryfallTagger_data/tag_dependency_graph.graphml")
 
     exit(0)
+
+    tag_data = load_tag_data(input_file_tagger)
 
     tags_to_include = extract_all_tags_with_min_freq(tag_data, min_count=MIN_COUNT)
     tag_to_index = {tag: idx for idx, tag in enumerate(tags_to_include)}
