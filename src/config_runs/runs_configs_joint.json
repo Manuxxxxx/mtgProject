@@ -1,5 +1,4 @@
-  [
-    {
+  [{
       "run_name": "two_phase_joint_training_tag",
 
       "train_tag_model": true,
@@ -9,34 +8,21 @@
       "start_epoch": 0,
       "run_name_previous": null,
 
-      "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250716_184839/bert_tag_only_final.pt",
-      "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250716_184839/tag_tag_only_final_model.pt",
+      "bert_checkpoint_tag": null,
+      "tag_checkpoint_tag": null,
 
       "bert_checkpoint_multi": null,
       "tag_checkpoint_multi": null,
       "synergy_checkpoint": null,
       "tag_projector_checkpoint": null,
 
-      "freeze_bert_epochs_tag": null,
-      "freeze_bert_layers_tag": null,
-      "freeze_bert_epochs_multi": 5,
+      "freeze_bert_epochs_tag": 15,
+      "freeze_bert_layers_tag": 6,
+      "freeze_bert_epochs_multi": 15,
       "freeze_bert_layers_multi": 6,
 
-      "bert_model_name": "distilbert-base-uncased",
-      "bert_learning_rate_multi": 1e-5,
-      "bert_learning_rate_tag": 2e-5,
-      
-      "bert_embedding_dim": 384,
-      "max_length_bert_tokenizer": 280,
-
-      "synergy_arch": "modelComplex",
-      "synergy_learning_rate": 1e-4,
-
-      "optimizer": "Adam",
-      "optimizer_config": {},
-
       "epochs_multi": 20,
-      "epochs_tag": 0,
+      "epochs_tag": 20,
 
       "batch_size": 5,
       "accumulation_steps": 4,
@@ -44,43 +30,61 @@
       "eval_every": 1,
       "save_every": 1,
 
+      "bert_model_name": "distilbert-base-uncased",
+      "bert_learning_rate_multi": 1e-5,
+      "bert_learning_rate_tag": 2e-5,
+
+      "bert_embedding_dim": 384,
+      "max_length_bert_tokenizer": 256,
+
+      "synergy_arch": "modelComplex",
+      "synergy_learning_rate": 1e-4,
+
+      "optimizer": "Adam",
+      "optimizer_config": {},
+
       "synergy_pos_weight": null,
       "synergy_false_positive_penalty": 3.0,
 
       "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
-      "bulk_file": "datasets/processed/tag_included/cards_with_tags_103_20250627182008.json",
-      "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_103_20250627182008.json",
+      "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
+      "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_641_20250730155929.json",
       "log_dir": "runs/two_phase_joint",
       "save_dir": "checkpoints/two_phase_joint",
 
-      "splits_tag":{
-        "train": 0.4,
-        "val": 0.1
+      "splits_tag": {
+          "train": 0.4,
+          "val": 0.1
       },
-      "splits" : {
-        "train": {"real": 0.5, "fake": 0.2},
-        "val_real": {"real": 0.1, "fake": 0.0},
-        "val_real_fake": {"real": 0.1, "fake": 0.03}
+      "splits": {
+          "train": { "real": 0.5, "fake": 0.2 },
+          "val_real": { "real": 0.1, "fake": 0.0 },
+          "val_real_fake": { "real": 0.1, "fake": 0.03 }
       },
-      
+
       "tag_learning_rate_tag": 5e-4,
       "tag_learning_rate_multi": 1e-4,
 
       "tag_hidden_dims": [512, 256],
-      "tag_output_dim": 103,
+      "tag_output_dim": 641,
       "tag_loss_weight": 0.5,
       "tag_dropout": 0.3,
       "use_focal": true,
       "focal_gamma": 2.0,
       "tag_use_sigmoid_output": false,
 
+      "use_multitask_projector": true,
+      "multitask_projector_synergy_dim": 256,
+      "multitask_projector_hidden_dim": 256,
+      "multitask_projector_tag_dim": 256,
+      "multitask_projector_dropout": 0.1,
+
       "tag_projector_output_dim": 64,
-      "tag_projector_hidden_dim": 32,
+      "tag_projector_hidden_dim": 128,
       "tag_projector_dropout": 0.3,
       "tag_projector_learning_rate": 5e-4,
+
       "train_calc_metrics": true,
       "test_at_start_sets": []
 
-    }
-  ]
-    
+  }]

@@ -206,16 +206,16 @@ def filter_cards_by_sets(card_data, sets_to_include):
 
 
 if __name__ == "__main__":
-    MIN_COUNT = 0
+    MIN_COUNT = 50
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
 
-    graph = create_tag_dependency_graph(input_file_tagger)
-    # nx.draw(graph, with_labels=True)
-    # plt.show()
-    # save the graph to a file
-    nx.write_graphml(graph, "datasets/scryfallTagger_data/tag_dependency_graph.graphml")
+    # graph = create_tag_dependency_graph(input_file_tagger)
+    # # nx.draw(graph, with_labels=True)
+    # # plt.show()
+    # # save the graph to a file
+    # nx.write_graphml(graph, "datasets/scryfallTagger_data/tag_dependency_graph.graphml")
 
-    exit(0)
+    # exit(0)
 
     tag_data = load_tag_data(input_file_tagger)
 

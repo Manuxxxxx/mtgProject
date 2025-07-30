@@ -25,11 +25,12 @@ class CardDataset(Dataset):
         self.tags_len = tags_len
         self.dataset_name = dataset_name
         if tag_to_index_file is not None:
+            print(f"Loading tag_to_index from {tag_to_index_file}")
             with open(tag_to_index_file, "r") as f:
                 self.tag_to_index = json.load(f)
-
-        if tags_len is not None:
-            if tag_to_index_file is None:
+        else:
+            print("No tag_to_index file provided, building from data")
+            if tags_len is not None:
                 all_tags = set()
                 for card in self.data:
                     if "tags" in card and card["tags"]:
@@ -40,17 +41,27 @@ class CardDataset(Dataset):
                     raise ValueError(
                         f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                     )
+            else:
+                raise ValueError(
+                    "tags_len must be provided if tag_to_index_file is not specified."
+                )
+        # self.index_to_tag = {v: k for k, v in self.tag_to_index.items()}
 
-            self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
-            self.total_tag_samples = 0
+        self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
+        self.total_tag_samples = 0
 
-            for card in self.data:
-                tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
-                if tag_vec.shape[0] == self.tags_len:
-                    self.tag_counts += tag_vec
-                    self.total_tag_samples += 1
+        for card in self.data:
+            tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
+            tag_vec = tag_vec.to(torch.float32)  # convert to float32
+            if tag_vec.shape[0] == self.tags_len:
+                self.tag_counts += tag_vec
+                self.total_tag_samples += 1
 
-                card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
+            card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
+            
+        # for tag in self.tag_to_index:
+        #     # print tag_count for each tag
+        #     print(f"Tag '{tag}': {self.tag_counts[self.tag_to_index[tag]]} samples")
 
     def __len__(self):
         return len(self.data)
@@ -75,14 +86,16 @@ class CardDataset(Dataset):
         Convert card tags to a one-hot encoded vector.
         """
         if self.tags_len is None:
-            return torch.zeros(0, dtype=torch.float32)
-        if "tags" not in card or not card["tags"]:
+            raise ValueError("tags_len must be set to encode tags.")
+        if "tags_labels" not in card or not card["tags_labels"]:
+            # print(f"Card {card['name']} has no tags, returning zero vector.")
             return torch.zeros(self.tags_len, dtype=torch.float32)
 
         tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
 
-        for tag in card["tags"]:
+        for tag in card["tags_labels"]:
             if tag in self.tag_to_index:
+                # print(f"Encoding tag '{tag}' for card {card['name']}")
                 tag_vector[self.tag_to_index[tag]] = 1.0
             else:
                 raise ValueError(
@@ -124,9 +137,8 @@ class JointCardDataset(Dataset):
         if tag_to_index_file is not None:
             with open(tag_to_index_file, "r") as f:
                 self.tag_to_index = json.load(f)
-
-        if tags_len is not None:
-            if tag_to_index_file is None:
+        else:
+            if tags_len is not None:
                 # If no tag_to_index_file is provided, build the tag_to_index from the synergy data
                 all_tags = set()
                 for c in self.card_lookup.values():
@@ -139,19 +151,21 @@ class JointCardDataset(Dataset):
                         f"Expected {tags_len} tags, but found {len(self.tag_to_index)} unique tags in the dataset."
                     )
 
-            self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
-            self.total_tag_samples = 0
+        self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
+        self.total_tag_samples = 0
 
-            for synergy_pair in self.synergy_data:
-                for card_key in ["card1", "card2"]:
-                    card = self.find_card_by_name(synergy_pair[card_key]["name"])
-                    if card:
-                        tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
-                        if tag_vec.shape[0] == self.tags_len:
-                            self.tag_counts += tag_vec
-                            self.total_tag_samples += 1
+        for synergy_pair in self.synergy_data:
+            for card_key in ["card1", "card2"]:
+                card = self.find_card_by_name(synergy_pair[card_key]["name"])
+                if card:
+                    tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
+                    # convert tag_vec from float32 to float32
+                    tag_vec = tag_vec.to(torch.float32)
+                    if tag_vec.shape[0] == self.tags_len:
+                        self.tag_counts += tag_vec
+                        self.total_tag_samples += 1
 
-                        card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
+                    card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
 
         self.calculate_synergy_counts()
         if debug_dataset:
@@ -239,12 +253,12 @@ class JointCardDataset(Dataset):
         """
         if self.tags_len is None:
             return torch.zeros(0, dtype=torch.float32)
-        if "tags" not in card or not card["tags"]:
+        if "tags_labels" not in card or not card["tags_labels"]:
             return torch.zeros(self.tags_len, dtype=torch.float32)
 
         tag_vector = np.zeros(len(self.tag_to_index), dtype=np.float32)
 
-        for tag in card["tags"]:
+        for tag in card["tags_labels"]:
             if tag in self.tag_to_index:
                 tag_vector[self.tag_to_index[tag]] = 1.0
             else:
