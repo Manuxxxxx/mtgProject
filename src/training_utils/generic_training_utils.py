@@ -2,7 +2,10 @@ import sys
 import random
 import numpy as np
 import json
+import torch
+
 from src.training_utils import bert_parsing
+from src.models.losses.focal_loss import FocalLoss
 
 ANSI_COLORS = {
     "reset": "\033[0m",
@@ -212,6 +215,20 @@ def split_indices(real_indices, fake_indices, splits, log_splits=False):
 
     return final_splits
 
+def calculate_tag_model_pos_weight(train_dataset, device, config):
+    if config.get("tag_model_pos_weight", None) is not None:
+        print(f"Using provided tag model pos weight: {config['tag_model_pos_weight']}")
+        tag_model_pos_weight = torch.tensor([config["tag_model_pos_weight"]]).to(device)
+    else:
+        tag_counts = train_dataset.tag_counts  # shape: (tags_len,)
+        total = train_dataset.total_tag_samples  # scalar
+
+        neg_counts = total - tag_counts  # how many times each tag is not present
+        tag_model_pos_weight = (neg_counts / (tag_counts + 1e-6)).to(
+            device
+        )  # avoid div-by-zero
+        print(f"Calculated tag model pos weight: {tag_model_pos_weight}")
+    return tag_model_pos_weight
 
 def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
     """
@@ -247,3 +264,10 @@ def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
         )
 
     return loss_tag_fn
+
+def get_labels(batch, device):
+    tag_hot1 = batch["tag_hot1"].to(device)
+    tag_hot2 = batch["tag_hot2"].to(device)
+    labels_synergy = batch["label"].to(device)
+
+    return tag_hot1, tag_hot2, labels_synergy
