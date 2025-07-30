@@ -516,7 +516,7 @@ def train_tag_model(
     )
 
     optimizer, loss_tag_fn = build_training_components_tag(
-        config, bert_model, tag_model, device, tag_model_pos_weight=tag_model_pos_weight
+        config, bert_model, tag_model, device, tag_model_pos_weight=tag_model_pos_weight, use_multitask_projector=use_multitask_projector, multitask_projector_model=multitask_projector_model
     )
 
     print_separator()

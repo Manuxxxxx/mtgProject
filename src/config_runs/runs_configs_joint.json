@@ -78,6 +78,8 @@
       "multitask_projector_hidden_dim": 256,
       "multitask_projector_tag_dim": 256,
       "multitask_projector_dropout": 0.1,
+      "multitask_projector_learning_rate_tag": 5e-4,
+      "multitask_projector_learning_rate_multi": 5e-4,
 
       "tag_projector_output_dim": 64,
       "tag_projector_hidden_dim": 128,

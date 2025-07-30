@@ -9,7 +9,7 @@ from src.training_utils.generic_training_utils import (
 
 
 def build_training_components_tag(
-    config, bert_model, tag_model, device, tag_model_pos_weight=None
+    config, bert_model, tag_model, device, tag_model_pos_weight=None, use_multitask_projector=False, multitask_projector_model=None
 ):
     optimizer = build_tag_optimizer(
         optimizer_name=config["optimizer"],
@@ -18,9 +18,18 @@ def build_training_components_tag(
         tag_lr=config["tag_learning_rate_tag"],
         bert_lr=config["bert_learning_rate_tag"],
         optimizer_config=config.get("optimizer_config", {}),
+        use_multitask_projector=use_multitask_projector,
+        multitask_projector_model=multitask_projector_model,
+        multitasak_proj_lr=config.get("multitask_projector_learning_rate_tag", None),
+        
     )
 
     models_with_names = [("bert_model", bert_model), ("tag_model", tag_model)]
+    
+    if use_multitask_projector:
+        models_with_names.append(
+            ("multitask_projector_model", multitask_projector_model)
+        )
 
     print_models_param_summary(models_with_names, optimizer)
 
@@ -34,12 +43,21 @@ def build_training_components_tag(
 
 
 def build_tag_optimizer(
-    optimizer_name, tag_model, bert_model, tag_lr, bert_lr, optimizer_config
+    optimizer_name, tag_model, bert_model, tag_lr, bert_lr, optimizer_config, use_multitask_projector=False, multitask_projector_model=None, multitasak_proj_lr=None
 ):
     param_groups = [
         {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
         {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
     ]
+    
+    if use_multitask_projector:
+        param_groups.append(
+            {
+                "params": multitask_projector_model.parameters(),
+                "lr": multitasak_proj_lr,
+                "name": "multitask_projector_model",
+            }
+        )
 
     if optimizer_name == "Adam":
         return optim.Adam(param_groups, **optimizer_config)

@@ -16,8 +16,10 @@ def build_training_components_multitask(
     device,
     tag_model,
     tag_projector_model,
-    tag_model_pos_weight=1.0,
+    tag_model_pos_weight=None,
     synergy_model_pos_weight=1.0,
+    use_multitask_projector=False,
+    multitask_projector_model=None
 ):
     optimizer = build_multitask_optimizer(
         bert_model=bert_model,
@@ -30,6 +32,9 @@ def build_training_components_multitask(
         tag_lr=config["tag_learning_rate_multi"],
         optimizer_config=config.get("optimizer_config", {}),
         optimizer_name=config.get("optimizer"),
+        use_multitask_projector=use_multitask_projector,
+        multitask_projector_model=multitask_projector_model,
+        multitasak_proj_lr=config.get("multitask_projector_learning_rate_multi", None),
     )
 
     models_with_names = [
@@ -38,6 +43,11 @@ def build_training_components_multitask(
         ("tag_projector_model", tag_projector_model),
         ("tag_model", tag_model),
     ]
+    
+    if use_multitask_projector:
+        models_with_names.append(
+        ("multitask_projector_model", multitask_projector_model)
+    )
 
     print_models_param_summary(models_with_names, optimizer)
 
@@ -70,6 +80,9 @@ def build_multitask_optimizer(
     optimizer_config,
     tag_model,
     tag_lr,
+    use_multitask_projector=False,
+    multitask_projector_model=None,
+    multitasak_proj_lr=None
 ):
     param_groups = [
         {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
@@ -85,6 +98,15 @@ def build_multitask_optimizer(
         },
         {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
     ]
+    
+    if use_multitask_projector:
+        param_groups.append(
+            {
+                "params": multitask_projector_model.parameters(),
+                "lr": multitasak_proj_lr,
+                "name": "multitask_projector_model",
+            }
+        )
 
     if optimizer_name == "Adam":
         return optim.Adam(param_groups, **optimizer_config)
