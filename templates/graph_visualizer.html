@@ -197,7 +197,7 @@
                   'text-halign': 'center',
                   'width': 20,
                   'height': 20,
-                  'font-size': 8,
+                  'font-size': 10,
                   'overlay-padding': '6px',
                   'z-index': 10
                 }
@@ -206,25 +206,49 @@
                 selector: 'edge',
                 style: {
                   'width': 'data(width)',
-                  'line-color': '#6fe3a3',
+                  'line-color': '#2e8253',
                   'curve-style': 'bezier',
                 }
               },
               {
                 selector: '.selected-node',
                 style: {
-                  'background-color': '#FF4136',
+                  'background-color': '#50607a',
                   'width': 30,
                   'height': 30,
-                  'font-size': 12,
+                  'font-size': 14,
                   'z-index': 20
                 }
               },
               {
                 selector: '.selected-edge',
                 style: {
+                  'line-color': '#1d1a6e',
+                  'width': 4
+                }
+              },
+              {
+                selector: '.connected-node',
+                style: {
+                  'background-color': '#7a5a50',
+                  'width': 25,
+                  'height': 25,
+                  'font-size': 12,
+                  'z-index': 20
+                }
+              },
+              {
+                selector: 'edge:selected',
+                style: {
                   'line-color': '#FF4136',
                   'width': 4
+                }
+              },
+              {
+                selector: ':active',
+                style: {
+                  'overlay-color': '#ffcc00',
+                  'overlay-opacity': 0.5
                 }
               }
             ],
@@ -259,6 +283,7 @@
       if (!cy) return;
       cy.nodes().removeClass('selected-node');
       cy.edges().removeClass('selected-edge');
+      cy.nodes().removeClass('connected-node');
     }
 
     function selectNode(nodeId) {
@@ -275,6 +300,10 @@
       const inEdges = node.incomers('edge');
       outEdges.addClass('selected-edge');
       inEdges.addClass('selected-edge');
+
+      connectedNodes = outEdges.connectedNodes().union(inEdges.connectedNodes());
+      connectedNodes = connectedNodes.filter(n => n.id() !== node.id());
+      connectedNodes.addClass('connected-node');
 
       selectedNodeId = nodeId;
 
