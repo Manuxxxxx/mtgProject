@@ -1,6 +1,7 @@
 import json
 import time
-import conf
+import os
+import src.utils.conf as conf
 
 
 def print_all_layouts(cards):
@@ -21,17 +22,18 @@ def print_all_layouts(cards):
                 card_faces = card.get("card_faces", [])
                 if layout not in layouts:
                     layouts.add(layout)
-                    print(f"Card: {card.get('name')}, Layout: {layout}, Card Faces: {json.dumps([face["name"] for face in card_faces], indent=2)}")
+                    print(
+                        f"Card: {card.get('name')}, Layout: {layout}, Card Faces: {json.dumps([face["name"] for face in card_faces], indent=2)}"
+                    )
                     print("--------------------------\n\n")
 
+                # print the card name and layout and card_faces
 
-                #print the card name and layout and card_faces
-                
                 if card_faces:
                     # Collect all unique field names in card_faces
                     for face in card_faces:
                         for key in face.keys():
-                            #if key is a object, expand it
+                            # if key is a object, expand it
                             if isinstance(face[key], dict):
                                 for sub_key in face[key].keys():
                                     fieldsnames_in_card_faces.add(f"{key}.{sub_key}")
@@ -40,11 +42,8 @@ def print_all_layouts(cards):
                                 objects_in_card_faces.add(face[key])
                             fieldsnames_in_card_faces.add(key)
 
-                    
                 # else:
                 #     print(f"Card: {card.get('name')}, Layout: {layout}, Card Faces: None")
-
-                    
 
     print("Unique layouts found:")
     for layout in sorted(layouts):
@@ -55,6 +54,7 @@ def print_all_layouts(cards):
     print("\nObjects in card_faces:")
     for obj in sorted(objects_in_card_faces):
         print(f"- {obj}")
+
 
 def handle_normal_cards(card):
     """
@@ -82,6 +82,7 @@ def handle_normal_cards(card):
         "image_uris": card.get("image_uris", {}),
         "layout": card.get("layout", "normal"),
     }
+
 
 def handle_special_layouts(card, special_layouts_noflip):
     """
@@ -130,6 +131,7 @@ def handle_special_layouts(card, special_layouts_noflip):
             simplified["image_uris"] = card.get("image_uris", {})
 
     return simplified
+
 
 def filter_commander_legal_cards_and_process(
     input_file, output_file, set_list, indent=1, output_dir=""
@@ -231,6 +233,7 @@ def save_cards(cards, output_file, output_dir, indent_bol=True):
         with open(output_dir + "no_indent/" + output_file, "w", encoding="utf-8") as f:
             json.dump(cards, f, ensure_ascii=False)
 
+
 def extract_all_sets_from_file(bulk_file):
     """
     Extract all sets from the bulk file.
@@ -250,15 +253,14 @@ def extract_all_sets_from_file(bulk_file):
     except Exception as e:
         print(f"An error occurred: {str(e)}")
         return []
-    
+
+
 def extract_all_sets(bulk_data):
     sets = set()
     for card in bulk_data:
         sets.add(card.get("set"))
 
     return list(sets)
-
-    
 
 
 if __name__ == "__main__":
@@ -267,13 +269,15 @@ if __name__ == "__main__":
     output_json = "commander_legal_cards" + date + ".json"  # Output file
     output_dir = "datasets/processed/"
 
+    os.makedirs(output_dir + "indent", exist_ok=True)
+    os.makedirs(output_dir + "no_indent", exist_ok=True)
+
     sets_to_include = conf.all_sets
 
     # with open(input_json, "r", encoding="utf-8") as f:
     #     cards = json.load(f)
 
     # print_all_layouts(cards)
-    
 
     filter_commander_legal_cards_and_process(
         input_json, output_json, sets_to_include, indent=2, output_dir=output_dir

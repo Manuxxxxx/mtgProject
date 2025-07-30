@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Synergy Graph</title>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.24.0/cytoscape.min.js"></script>
+        <style>
+            body {
+                display: flex;
+                font-family: Arial, sans-serif;
+                margin: 0;
+                height: 100vh;
+                overflow: hidden;
+            }
+            #controls {
+                padding: 10px;
+                width: 300px;
+                background: #f7f7f7;
+                border-right: 1px solid #ccc;
+                box-sizing: border-box;
+                overflow-y: auto;
+            }
+            #cy {
+                flex-grow: 1;
+                height: 100vh;
+                border: 1px solid #ccc;
+            }
+            select[multiple] {
+                width: 100%;
+                height: 140px;
+                box-sizing: border-box;
+            }
+            label {
+                font-weight: bold;
+                margin-top: 10px;
+                display: block;
+            }
+            input[type="range"] {
+                width: 100%;
+            }
+            button {
+                margin-top: 15px;
+                padding: 8px 15px;
+                font-size: 1rem;
+                cursor: pointer;
+            }
+            #cardDetails {
+                position: absolute;
+                right: 0;
+                top: 0;
+                width: 320px;
+                max-height: 100vh;
+                background: white;
+                border-left: 1px solid #ccc;
+                overflow-y: auto;
+                box-sizing: border-box;
+                padding: 10px;
+                font-size: 14px;
+                display: none;
+                z-index: 10;
+            }
+            #cardDetails h2 {
+                margin-top: 0;
+                font-size: 1.2rem;
+            }
+            #cardDetails img {
+                max-width: 100%;
+                display: block;
+                margin-bottom: 10px;
+                border: 1px solid #ddd;
+                border-radius: 3px;
+            }
+            #connectedCards {
+                margin-top: 15px;
+                border-top: 1px solid #ddd;
+                padding-top: 10px;
+            }
+            #connectedCards ul {
+                list-style: none;
+                padding-left: 0;
+                max-height: 200px;
+                overflow-y: auto;
+                margin: 0;
+            }
+            #connectedCards li {
+                cursor: pointer;
+                color: #0066cc;
+                margin-bottom: 5px;
+                text-decoration: underline;
+            }
+            #connectedCards li:hover {
+                color: #003d80;
+            }
+            .highlight-node {
+                background-color: #ffcc00 !important;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="controls">
+            <label>Card Sets (select 1–5):</label>
+            <select id="setSelector" multiple size="8"></select>
+
+            <label>Min Synergy Score: <span id="minScoreVal">0.9</span></label>
+            <input
+                type="range"
+                id="minScore"
+                min="0.5"
+                max="1.0"
+                step="0.01"
+                value="0.9"
+            />
+
+            <label>Max Synergy Score: <span id="maxScoreVal">1.0</span></label>
+            <input
+                type="range"
+                id="maxScore"
+                min="0.5"
+                max="1.0"
+                step="0.01"
+                value="1.0"
+            />
+
+            <label>UMAP Scale: <span id="scaleVal">25</span></label>
+            <input
+                type="range"
+                id="scaleSlider"
+                min="15"
+                max="100"
+                step="5"
+                value="25"
+            />
+
+            <button onclick="loadGraph()">Update Graph</button>
+        </div>
+
+        <div id="cy"></div>
+
+        <div id="cardDetails">
+            <button onclick="closeCardDetails()" style="float: right">
+                ✖ Close
+            </button>
+            <div id="cardContent"></div>
+            <div id="connectedCards">
+                <h3>Connected Cards</h3>
+                <ul id="connectedList"></ul>
+            </div>
+        </div>
+
+        <script>
+            let sets = {{ sets | tojson }};
+            const selector = document.getElementById('setSelector');
+            let cy = null;
+            let selectedNodeId = null;
+
+
+            //exclude sets with "Token" in the name
+            for (const code in sets) {
+              if (sets[code].includes("Token")) {
+                delete sets[code];
+              }
+            }
+
+            // sort the sets by the name not the code
+            const sortedSets = Object.entries(sets).sort((a, b) => a[1].localeCompare(b[1]));
+            sets = Object.fromEntries(sortedSets);
+
+
+
+            // Populate sets dropdown with name and code
+            for (const [code, name] of Object.entries(sets)) {
+              const opt = document.createElement('option');
+              opt.value = code;
+              opt.textContent = name;
+              selector.appendChild(opt);
+            }
+
+            // Update slider labels
+            document.getElementById('minScore').oninput = e => document.getElementById('minScoreVal').textContent = e.target.value;
+            document.getElementById('maxScore').oninput = e => document.getElementById('maxScoreVal').textContent = e.target.value;
+            document.getElementById('scaleSlider').oninput = e => document.getElementById('scaleVal').textContent = e.target.value;
+
+            function loadGraph(focusNodeId = null) {
+              console.log('Loading graph with focusNodeId:', focusNodeId);
+              const selectedSets = Array.from(selector.selectedOptions).map(opt => opt.value);
+              const minScore = parseFloat(document.getElementById('minScore').value);
+              const maxScore = parseFloat(document.getElementById('maxScore').value);
+              const scale = parseInt(document.getElementById('scaleSlider').value);
+
+              if (selectedSets.length === 0) {
+                alert('Please select at least one set.');
+                return;
+              }
+              const queryString = selectedSets
+                .map(s => 'sets[]=' + encodeURIComponent(s))
+                .join('&') +
+                `&min_score=${encodeURIComponent(minScore)}&max_score=${encodeURIComponent(maxScore)}&scale=${encodeURIComponent(scale)}`;
+
+
+              fetch(`/graph_data?${queryString}`)
+                .then(res => res.json())
+                .then(data => {
+                  if (cy) {
+                    cy.destroy();
+                    selectedNodeId = null;
+                    hideCardDetails();
+                  }
+
+                  cy = cytoscape({
+                    container: document.getElementById('cy'),
+                    elements: [...data.nodes, ...data.edges],
+                    style: [
+                      {
+                        selector: 'node',
+                        style: {
+                          'background-color': '#0074D9',
+                          'label': 'data(label)',
+                          'color': '#fff',
+                          'text-valign': 'center',
+                          'text-halign': 'center',
+                          'width': 20,
+                          'height': 20,
+                          'font-size': 8,
+                          'overlay-padding': '6px',
+                          'z-index': 10
+                        }
+                      },
+                      {
+                        selector: 'edge',
+                        style: {
+                          'width': 'data(width)',
+                          'line-color': '#6fe3a3',
+                          'curve-style': 'bezier',
+                        }
+                      },
+                      {
+                        selector: '.selected-node',
+                        style: {
+                          'background-color': '#FF4136',
+                          'width': 30,
+                          'height': 30,
+                          'font-size': 12,
+                          'z-index': 20
+                        }
+                      },
+                      {
+                        selector: '.selected-edge',
+                        style: {
+                          'line-color': '#FF4136',
+                          'width': 4
+                        }
+                      }
+                    ],
+                    layout: { name: 'preset' },
+                  });
+
+                  document.getElementById('cy').style.backgroundColor = '#1e1e1e';
+
+
+                  cy.on('tap', 'node', evt => {
+                    const node = evt.target;
+                    const nodeId = node.id();
+                    if (selectedNodeId === nodeId) {
+                      // Deselect node if clicked again
+                      clearSelection();
+                      hideCardDetails();
+                      selectedNodeId = null;
+                    } else {
+                      selectNode(nodeId);
+                    }
+                  });
+
+                  if (focusNodeId) {
+                    selectNode(focusNodeId);
+                  }
+
+                });
+              console.log('Graph loaded with sets:', selectedSets, 'minScore:', minScore, 'maxScore:', maxScore, 'scale:', scale);
+            }
+
+            function clearSelection() {
+              if (!cy) return;
+              cy.nodes().removeClass('selected-node');
+              cy.edges().removeClass('selected-edge');
+            }
+
+            function selectNode(nodeId) {
+              if (!cy) return;
+              clearSelection();
+
+              const node = cy.getElementById(nodeId);
+              if (!node) return;
+
+              node.addClass('selected-node');
+
+              // Highlight edges from this node
+              const outEdges = node.outgoers('edge');
+              const inEdges = node.incomers('edge');
+              outEdges.addClass('selected-edge');
+              inEdges.addClass('selected-edge');
+
+              selectedNodeId = nodeId;
+
+              fetch(`/card_info?name=${encodeURIComponent(node.data('label'))}`)
+                .then(res => res.json())
+                .then(card => {
+                  if (card.error) {
+                    showCardDetails(`<p>Card data not found.</p>`, []);
+                    return;
+                  }
+                  renderCardDetails(card, node);
+                });
+            }
+
+            function renderCardDetails(card, node) {
+              // Handle image URLs (1 or 2 face layouts)
+              let imagesHtml = '';
+              if (card.layout === "normal" || card.layout === "flip") {
+                // Single image card
+                const imgUrl = card.image_uris?.normal || (card.card_faces ? card.card_faces[0].image_uris?.normal : null);
+                if (imgUrl) imagesHtml = `<img src="${imgUrl}" alt="${card.name}" />`;
+              } else if (card.layout === "transform" || card.layout === "modal_dfc") {
+                // Two-faced card - show both images side by side
+                if (card.card_faces && card.card_faces.length === 2) {
+                  const img1 = card.card_faces[0].image_uris?.normal || "";
+                  const img2 = card.card_faces[1].image_uris?.normal || "";
+                  imagesHtml = `
+                    <div style="display:flex; gap:5px;">
+                      <img src="${img1}" alt="${card.card_faces[0].name}" style="width:49%;" />
+                      <img src="${img2}" alt="${card.card_faces[1].name}" style="width:49%;" />
+                    </div>`;
+                } else {
+                  const imgUrl = card.image_uris?.normal || "";
+                  if (imgUrl) imagesHtml = `<img src="${imgUrl}" alt="${card.name}" />`;
+                }
+              } else {
+                // fallback single image if exists
+                const imgUrl = card.image_uris?.normal || (card.card_faces ? card.card_faces[0].image_uris?.normal : null);
+                if (imgUrl) imagesHtml = `<img src="${imgUrl}" alt="${card.name}" />`;
+              }
+
+              // Format card details text
+              const manaCost = card.mana_cost || "";
+              const cmc = card.cmc !== undefined ? card.cmc : "";
+              const typeLine = card.type_line || "";
+              const oracleText = card.oracle_text || (card.card_faces ? card.card_faces.map(f => f.oracle_text).filter(Boolean).join('\n---\n') : "");
+              const pt = (card.power !== undefined && card.toughness !== undefined)
+                ? `${card.power}/${card.toughness}`
+                : (card.card_faces && card.card_faces.length === 2)
+                  ? `${card.card_faces[0].power || "?"}/${card.card_faces[0].toughness || "?"} - ${card.card_faces[1].power || "?"}/${card.card_faces[1].toughness || "?"}`
+                  : "";
+
+              const colors = card.colors ? card.colors.join(", ") : (card.card_faces ? card.card_faces.flatMap(f => f.colors || []).filter((v,i,a) => a.indexOf(v) === i).join(", ") : "");
+              const tags = card.tags ? card.tags.join(", ") : "";
+
+              let detailsHtml = `
+                <h2>${card.name}</h2>
+                ${imagesHtml}
+                <p><strong>Mana Cost:</strong> ${manaCost}</p>
+                <p><strong>CMC:</strong> ${cmc}</p>
+                <p><strong>Type:</strong> ${typeLine}</p>
+                <p><strong>Colors:</strong> ${colors}</p>
+                ${pt ? `<p><strong>Power/Toughness:</strong> ${pt}</p>` : ""}
+                <p><strong>Oracle Text:</strong><br>${oracleText.replace(/\n/g,"<br>")}</p>
+                ${tags ? `<p><strong>Tags:</strong> ${tags}</p>` : ""}
+              `;
+
+              // Get all edges connected to the node either as source or target
+              const connectedEdges = node.outgoers('edge').union(node.incomers('edge'));
+
+              // Then get all connected nodes from these edges except the node itself
+              const connectedNodes = connectedEdges.connectedNodes().filter(n => n.id() !== node.id());
+
+              // Sort by label as you want
+              connectedNodes.sort((a,b) => a.data('label').localeCompare(b.data('label')));
+
+
+              // Build connected cards list HTML
+              let connectedHtml = "";
+              if (connectedNodes.length === 0) {
+                connectedHtml = "<p>No connected cards.</p>";
+              } else {
+                connectedHtml = "<ul>";
+                connectedNodes.forEach(cn => {
+                  connectedHtml += `<li onclick="selectNode('${cn.id()}')">${cn.data('label')}</li>`;
+                });
+                connectedHtml += "</ul>";
+              }
+
+              showCardDetails(detailsHtml, connectedHtml);
+            }
+
+            function showCardDetails(detailsHtml, connectedHtml) {
+              document.getElementById('cardContent').innerHTML = detailsHtml;
+              document.getElementById('connectedList').innerHTML = connectedHtml;
+              document.getElementById('cardDetails').style.display = 'block';
+            }
+
+            function hideCardDetails() {
+              document.getElementById('cardDetails').style.display = 'none';
+              document.getElementById('cardContent').innerHTML = '';
+              document.getElementById('connectedList').innerHTML = '';
+            }
+
+            function closeCardDetails() {
+              clearSelection();
+              hideCardDetails();
+              selectedNodeId = null;
+            }
+
+            // Initialize default sets selection
+            (() => {
+              // Select first set by default
+              const opts = selector.options;
+              for (let i=0; i < opts.length && i < 1; i++) {
+                opts[i].selected = true;
+              }
+              loadGraph();
+            })();
+        </script>
+    </body>
+</html>

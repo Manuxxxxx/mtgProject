@@ -2,13 +2,16 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from tqdm import tqdm
+import os
 
-import conf
+import src.utils.conf as conf
 
 BASE_URL = "https://tagger.scryfall.com"
 
 
-def get_csrf_token(session: requests.Session, set_code: str, card_number: str) -> tuple[str, str]:
+def get_csrf_token(
+    session: requests.Session, set_code: str, card_number: str
+) -> tuple[str, str]:
     """Fetch the CSRF token and return it with the card page URL"""
     card_url = f"{BASE_URL}/card/{set_code}/{card_number}"
     response = session.get(card_url)
@@ -49,31 +52,33 @@ def build_graphql_payload(set_code: str, card_number: str) -> dict:
         "set": set_code,
         "number": card_number,
         "back": False,
-        "moderatorView": False
+        "moderatorView": False,
     }
-    return {
-        "query": query,
-        "variables": variables,
-        "operationName": "FetchCard"
-    }
+    return {"query": query, "variables": variables, "operationName": "FetchCard"}
 
 
-def fetch_card_data(session: requests.Session, csrf_token: str, card_url: str, payload: dict) -> dict:
+def fetch_card_data(
+    session: requests.Session, csrf_token: str, card_url: str, payload: dict
+) -> dict:
     """Send the GraphQL request and return the parsed JSON"""
     headers = {
         "Content-Type": "application/json",
         "X-CSRF-Token": csrf_token,
         "Referer": card_url,
         "Origin": BASE_URL,
-        "User-Agent": "Mozilla/5.0"
+        "User-Agent": "Mozilla/5.0",
     }
     response = session.post(f"{BASE_URL}/graphql", headers=headers, json=payload)
     if not response.ok:
-        raise RuntimeError(f"GraphQL request failed: {response.status_code}\n{response.text}")
+        raise RuntimeError(
+            f"GraphQL request failed: {response.status_code}\n{response.text}"
+        )
     return response.json()["data"]["card"]
 
 
-def separate_tags(taggings: list[dict], ignore_non_functional=True) -> tuple[list[dict], list[dict]]:
+def separate_tags(
+    taggings: list[dict], ignore_non_functional=True
+) -> tuple[list[dict], list[dict]]:
     """Split taggings into functional and non-functional by foreignKey"""
     functional, non_functional = [], []
     for tagging in taggings:
@@ -81,7 +86,7 @@ def separate_tags(taggings: list[dict], ignore_non_functional=True) -> tuple[lis
         entry = {
             "name": tag["name"],
             "category": tag["category"],
-            "ancestors": [a["name"] for a in tag.get("ancestorTags", [])]
+            "ancestors": [a["name"] for a in tag.get("ancestorTags", [])],
         }
         if tagging["foreignKey"] == "oracleId":
             functional.append(entry)
@@ -89,7 +94,10 @@ def separate_tags(taggings: list[dict], ignore_non_functional=True) -> tuple[lis
             non_functional.append(entry)
     return functional, non_functional
 
-def print_tag_summary(card_name: str, functional: list[dict], non_functional: list[dict]):
+
+def print_tag_summary(
+    card_name: str, functional: list[dict], non_functional: list[dict]
+):
     """Nicely format and print tag data"""
     print(f"\nCard: {card_name}")
 
@@ -105,15 +113,19 @@ def print_tag_summary(card_name: str, functional: list[dict], non_functional: li
         if tag["ancestors"]:
             print(f"   Ancestors: {', '.join(tag['ancestors'])}")
 
+
 def process_card(set_code: str, card_number: str, ignore_non_functional=True):
     """Main wrapper to process a single card"""
     session = requests.Session()
     csrf_token, card_url = get_csrf_token(session, set_code, card_number)
     payload = build_graphql_payload(set_code, card_number)
     card_data = fetch_card_data(session, csrf_token, card_url, payload)
-    functional, non_functional = separate_tags(card_data["taggings"], ignore_non_functional)
-    
+    functional, non_functional = separate_tags(
+        card_data["taggings"], ignore_non_functional
+    )
+
     return functional, non_functional
+
 
 def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
     """
@@ -132,10 +144,16 @@ def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
     csrf_token = None
     processed_count = 0
 
-    for set_code, cards_info in tqdm(unprocessed_cards.items(), desc="Processing all sets", unit="set"):
-        for collector_number in tqdm(cards_info["collector_number"], desc=f"Processing {set_code}", unit="card"):
+    for set_code, cards_info in tqdm(
+        unprocessed_cards.items(), desc="Processing all sets", unit="set"
+    ):
+        for collector_number in tqdm(
+            cards_info["collector_number"], desc=f"Processing {set_code}", unit="card"
+        ):
             if csrf_token is None:
-                csrf_token, card_url = get_csrf_token(session, set_code, collector_number)
+                csrf_token, card_url = get_csrf_token(
+                    session, set_code, collector_number
+                )
 
             payload = build_graphql_payload(set_code, collector_number)
             card_data = fetch_card_data(session, csrf_token, card_url, payload)
@@ -145,11 +163,11 @@ def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
             # Store the processed data
             if set_code not in already_processed:
                 already_processed[set_code] = {"collector_number": []}
-                
+
             already_processed[set_code]["collector_number"].append(collector_number)
             already_processed[set_code][collector_number] = {
                 "name": card_data["name"],
-                "functional_tags": functional_tags
+                "functional_tags": functional_tags,
             }
 
             # Print or save the tags as needed
@@ -163,9 +181,10 @@ def process_cards(sets_to_include, bulk_file, storage_file, save_every=50):
 
     # Final save after processing all cards
     with open(storage_file, "w") as file:
-        #indent at the end
+        # indent at the end
         json.dump(already_processed, file, indent=4)
     print(f"Processed {processed_count} cards. Data saved to {storage_file}.")
+
 
 def get_unprocessed_cards(sets_to_process, already_processed):
     unprocessed = {}
@@ -176,8 +195,7 @@ def get_unprocessed_cards(sets_to_process, already_processed):
             cards_to_process = sets_to_process[set_code]["collector_number"]
             if len(cards_to_process) > 0:
                 unprocessed[set_code] = {"collector_number": cards_to_process}
-                
-                
+
         else:
             # Find cards in sets_to_process but not in already_processed
             cards_to_process = sets_to_process[set_code]["collector_number"]
@@ -191,6 +209,7 @@ def get_unprocessed_cards(sets_to_process, already_processed):
                 unprocessed[set_code] = {"collector_number": unprocessed_cards}
 
     return unprocessed
+
 
 def get_ids_of_sets_to_process(sets_to_include, bulk_file):
     with open(bulk_file, "r") as file:
@@ -206,6 +225,7 @@ def get_ids_of_sets_to_process(sets_to_include, bulk_file):
         set_to_process[set_code] = card_to_process
     return set_to_process
 
+
 def get_id_set_already_processed(storage_file):
     # Check if the file exists
     try:
@@ -220,7 +240,8 @@ def get_id_set_already_processed(storage_file):
 # Example usage:
 if __name__ == "__main__":
     sets_to_include = conf.all_sets
-    bulk_file = "datasets/processed/indent/commander_legal_cards20250625183217.json"
+    bulk_file = "datasets/processed/indent/commander_legal_cards20250726222357.json"
     storage_file = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
+    os.makedirs(os.path.dirname(storage_file), exist_ok=True)
 
     process_cards(sets_to_include, bulk_file, storage_file, save_every=400)

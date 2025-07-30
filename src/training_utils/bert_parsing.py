@@ -1,5 +1,6 @@
 import json
-import conf
+import src.utils.conf as conf
+
 
 def format_card_for_bert(card):
     """
@@ -73,6 +74,7 @@ def format_card_for_bert(card):
         )
 
     return formatted.strip()
+
 
 # if __name__ == "__main__":
 #     # Example card data

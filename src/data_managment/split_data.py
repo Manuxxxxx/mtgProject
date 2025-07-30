@@ -1,12 +1,12 @@
 import json
 import random
-import conf
+import src.utils.conf as conf
 
 
-def split_data(input_file,save_dir, train_split_dim = 0.8, test_split_dim=0.1):
+def split_data(input_file, save_dir, train_split_dim=0.8, test_split_dim=0.1):
     """
     Split the data into train, test, and validation sets.
-    
+
     Args:
         input_file (str): Path to input JSON file
         train_split_dim (float): Proportion of data to use for training
@@ -37,10 +37,10 @@ def split_data(input_file,save_dir, train_split_dim = 0.8, test_split_dim=0.1):
             json.dump(test_data, f, indent=4, ensure_ascii=False)
         with open(f"{save_dir}/val_data.json", "w", encoding="utf-8") as f:
             json.dump(val_data, f, indent=4, ensure_ascii=False)
-        
 
     except Exception as e:
         print(f"Error: {e}")
+
 
 if __name__ == "__main__":
     input_file = conf.embedding_file
