@@ -1,0 +1,80 @@
+Project Log – MTG Commander Synergy & Tag Prediction System
+===========================================================
+
+Objective
+---------
+- Build a recommender system that suggests cards to add to a partially completed Commander deck in Magic: The Gathering (MTG).
+- Commander decks require exactly 100 singleton cards (no duplicates), and synergy is highly contextual.
+- A simple tool was also built that suggests the most synergistic cards for a given partial deck and commander, using a weighted average of synergy scores.
+- Synergy is defined as how two cards work well together, improving each other.
+
+Data Sources
+------------
+Functional Tags
+- Scraped from ScryfallTagger, a community project where users assign labels to cards.
+- Tags describe functional properties of cards, e.g., “activated ability,” “animate artifact.”
+- These are referred to as functional tags, representing the roles and mechanics of cards.
+
+Synergy Data
+- Scraped from EDHREC, which provides synergy-based card recommendations using its own formula.
+- Applied thresholds and conditions to define binary synergy labels (1 = synergistic, 0 = not).
+- Since EDHREC mostly lists positive synergies, negative examples were created by sampling random card pairs and assigning them label 0.
+- These “fake” synergies are only used to prevent the model from predicting 1 for everything; they will eventually be eliminated.
+- A custom GUI tool was built to allow manual synergy labeling with more nuanced labels beyond binary.
+
+Dataset Setup
+- Full set of MTG cards included.
+- Data is split into training, validation, and test sets.
+- Cards typically have 3–4 functional tags each.
+
+Models & Architecture
+---------------------
+BERT/DistilBERT
+- Embedding dimension fixed at 384 due to GPU limitations (GTX 970, 4GB VRAM).
+- Tried both BERT-base and DistilBERT with various embedding sizes.
+
+Tag Model
+- Input: card embeddings from BERT.
+- Output: multi-label prediction of functional tags.
+- Uses BCE or Focal Loss with class balancing.
+- Tag prediction is difficult due to class imbalance (many rare tags, min count threshold of 50 used).
+
+Tag Projector
+- Maps predicted tag probabilities (multi-hot vectors of ~103 tags) into dense embeddings (hidden_dim=256, output_dim=128).
+- Rationale: passing dense embeddings into the synergy model instead of raw binary vectors.
+- Unclear if this design is optimal.
+
+Synergy Model
+- Input:
+  - BERT embeddings of both cards.
+  - Tag projections of both cards.
+  - Element-wise interactions between embeddings and tag projections (concatenation, product, abs-difference).
+- Output: binary synergy prediction (1 = synergy, 0 = no synergy).
+- Symmetric architecture to avoid order sensitivity between card pairs.
+
+Experiments & Design Choices
+----------------------------
+- Initially attempted synergy prediction without tags → poor results.
+- Adding functional tag prediction improved synergy quality.
+- Tried multiple variants of BERT and embedding dimensions (settled on 384).
+- Loss balancing: synergy loss (CE) dominates over tag loss (Focal), requiring scaling.
+- Explored hierarchical penalties to enforce consistency in tag predictions (parent > child probabilities).
+- Designed a two-head MLP to split embeddings:
+  - One head optimized for tag prediction.
+  - One head optimized for synergy.
+  - Idea: avoid forcing a single shared embedding to serve both tasks (not yet tested).
+
+Limitations
+-----------
+- Strongly limited by hardware (GTX970, low VRAM).
+- Requires gradient accumulation and small batch sizes (5).
+- Random negative synergies may bias the model; need to collect real negative examples.
+- Tag projector design is experimental — unclear whether binary tags should be projected or used directly.
+
+Future Work
+-----------
+- Collect larger labeled synergy datasets via GUI.
+- Explore more efficient architectures (e.g., dual encoders, contrastive learning).
+- Investigate graph-based approaches (treat cards as nodes, synergies as edges).
+- Test the two-head MLP embedding split.
+- Experiment with schedulers, warmup strategies, and larger models if hardware permits.
