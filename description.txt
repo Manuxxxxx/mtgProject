@@ -14,18 +14,19 @@ Functional Tags
 - Scraped from ScryfallTagger, a community project where users assign labels to cards.
 - Tags describe functional properties of cards, e.g., “activated ability,” “animate artifact.”
 - These are referred to as functional tags, representing the roles and mechanics of cards.
+- Tag vocabulary is actively evolving (tag count changing); goal: add more tags to capture finer-grained functionality without substantially increasing model complexity.
 
 Synergy Data
 - Scraped from EDHREC, which provides synergy-based card recommendations using its own formula.
 - Applied thresholds and conditions to define binary synergy labels (1 = synergistic, 0 = not).
 - Since EDHREC mostly lists positive synergies, negative examples were created by sampling random card pairs and assigning them label 0.
-- These “fake” synergies are only used to prevent the model from predicting 1 for everything; they will eventually be eliminated.
+- These “fake” synergies are only used to prevent the model from predicting 1 for everything; they will eventually be eliminated with better negatives.
 - A custom GUI tool was built to allow manual synergy labeling with more nuanced labels beyond binary.
 
 Dataset Setup
 - Full set of MTG cards included.
 - Data is split into training, validation, and test sets.
-- Cards typically have 3–4 functional tags each.
+- Cards typically have 3–4 functional tags each (subject to the evolving tag set).
 
 Models & Architecture
 ---------------------
@@ -38,43 +39,110 @@ Tag Model
 - Output: multi-label prediction of functional tags.
 - Uses BCE or Focal Loss with class balancing.
 - Tag prediction is difficult due to class imbalance (many rare tags, min count threshold of 50 used).
+- Hierarchical penalties were explored to enforce consistency in tag predictions (parent > child probabilities).
 
-Tag Projector
-- Maps predicted tag probabilities (multi-hot vectors of ~103 tags) into dense embeddings (hidden_dim=256, output_dim=128).
+Tag Projector (Legacy)
+- Maps predicted tag probabilities (multi-hot vectors of ~variable tag count) into dense embeddings.
+- hidden_dim = 256, output_dim = 128.
 - Rationale: passing dense embeddings into the synergy model instead of raw binary vectors.
-- Unclear if this design is optimal.
+- Design is experimental — unclear whether binary tags should be projected or used directly.
+- Now made optional in the updated architecture (can be disabled when using hidden-layer embeddings).
+
+Tag Hidden Layer Integration (NEW / integrated)
+- The synergy model can now optionally receive the hidden-layer embeddings from the tag prediction model instead of using a separate projected tag vector.
+- This eliminates the need for a dedicated TagProjector when using hidden-layer embeddings.
+- Constraint: the hidden-layer approach and the TagProjector are mutually exclusive — use one or the other, not both simultaneously.
+- The hidden-layer embeddings are the internal activations (pre-output) of the tag model and may contain richer, continuous features than the projected tag output.
+- When using hidden-layer embeddings, a Detach toggle (see below) can be applied to control gradient flow.
 
 Synergy Model
 - Input:
   - BERT embeddings of both cards.
-  - Tag projections of both cards.
-  - Element-wise interactions between embeddings and tag projections (concatenation, product, abs-difference).
-- Output: binary synergy prediction (1 = synergy, 0 = no synergy).
-- Symmetric architecture to avoid order sensitivity between card pairs.
+  - Tag projections of both cards (if TagProjector enabled).
+  - Hidden-layer embeddings from the tag model (if enabled).
+  - Element-wise interactions between embeddings and tag representations (concatenation, product, abs-difference).
+- Output: binary synergy prediction (1 = synergy, 0 = no synergy) — modeled as classification with cross-entropy loss.
+- Architecture variants:
+  - Symmetric architecture to avoid order sensitivity between card pairs (order-invariant by design).
+  - Non-symmetric variant available when order sensitivity is desired (configurable via Symmetry toggle).
+- Flexible forward pass supports any of the above input combinations; this enables ablation-style experiments.
+- Supports combinations of detaching and symmetry settings to facilitate systematic experiments.
+
+MultiTaskProjector (Optional)
+- An optional module that splits card embeddings into two specialized representations: one optimized for tag prediction, one optimized for synergy prediction.
+- Implemented as a two-head MLP (or linear heads) that outputs:
+  - Tag head embedding — fed into the Tag Model for tag prediction.
+  - Synergy head embedding — fed directly into the Synergy Model.
+- Goal: avoid forcing a single shared embedding to serve both tasks and assess whether specialized embeddings improve performance.
+
+Configurable Components & Toggles (NEW / integrated)
+- MultiTaskProjector: optional splitting of embeddings into task-specific heads.
+- TagProjector: legacy module that projects predicted tags into a dense embedding for the synergy model; now optional.
+- Detach toggle: allows tag embeddings (projected or hidden-layer) to be detached from the computation graph before being passed to the Synergy Model. This prevents gradients from flowing back into the Tag Model and enables isolated training of the Synergy Model.
+- Symmetry toggle: lets you choose between a symmetrical synergy model (order-invariant card pairs) and a non-symmetrical version (order-sensitive).
+- Hidden-layer vs. projector: mutually exclusive selection — the system enforces this constraint at configuration time.
+- These configurable components are intended to make the system highly modular for experimentation.
 
 Experiments & Design Choices
 ----------------------------
 - Initially attempted synergy prediction without tags → poor results.
 - Adding functional tag prediction improved synergy quality.
-- Tried multiple variants of BERT and embedding dimensions (settled on 384).
-- Loss balancing: synergy loss (CE) dominates over tag loss (Focal), requiring scaling.
+- Tried multiple variants of BERT and embedding dimensions (settled on 384 due to hardware limits).
+- Loss balancing: synergy loss (cross-entropy) dominates over tag loss (Focal); requires scaling/weighting to train jointly.
 - Explored hierarchical penalties to enforce consistency in tag predictions (parent > child probabilities).
-- Designed a two-head MLP to split embeddings:
-  - One head optimized for tag prediction.
-  - One head optimized for synergy.
-  - Idea: avoid forcing a single shared embedding to serve both tasks (not yet tested).
+- Designed a two-head MLP (MultiTaskProjector) to split embeddings for tag vs. synergy tasks (not yet fully tested in early runs).
+- Modular experiments now supported:
+  - Hidden-layer embeddings vs. projected tag embeddings (mutually exclusive).
+  - Detach vs. joint gradient flow into the Tag Model.
+  - Symmetry (order-invariant) vs. order-sensitive architectures.
+  - MultiTaskProjector vs. shared embeddings.
+- Tag vocabulary expansion ongoing — trying to add more tags without increasing computational or model complexity too much (e.g., selective tag inclusion, frequency thresholds, grouping rare tags, or using hierarchy to compress tags).
+
+Training Details
+----------------
+- Tag Model training: multi-label optimization, BCE/Focal Loss, class balancing and thresholding for final multi-hot outputs.
+- Synergy Model training: binary classification with cross-entropy; inputs vary by experimental config.
+- Joint training setups: tag + synergy losses combined with a scaling factor to prevent synergy loss from dominating.
+- Isolated training setups: use Detach toggle or precompute tag embeddings and freeze Tag Model.
+- Batch size constrained by GPU memory → typically small (batch=5) with gradient accumulation.
+- Optimizers, schedulers, warmup strategies tested but limited by hardware availability.
+- Evaluation: held-out test set for synergy prediction; manual verification and GUI labeling for qualitative checks.
 
 Limitations
 -----------
-- Strongly limited by hardware (GTX970, low VRAM).
+- Strongly limited by hardware (GTX 970, 4GB VRAM).
 - Requires gradient accumulation and small batch sizes (5).
 - Random negative synergies may bias the model; need to collect real negative examples.
 - Tag projector design is experimental — unclear whether binary tags should be projected or used directly.
+- Still unclear whether hidden-layer embeddings or projected tags yield superior synergy signals.
+- Tag count is changing — expanding tags increases output dimensionality for tag prediction and may complicate TagProjector; strategies are being tested to add tags while managing complexity.
+
+Current Goals (Integrated)
+--------------------------
+- Compare hidden-layer embeddings vs. projected tags for capturing functional synergies.
+- Measure the impact of detaching gradients on joint vs. separate training regimes.
+- Evaluate the importance of order-invariance (symmetry) in synergy prediction.
+- Assess whether specialized MultiTaskProjector embeddings improve performance over shared BERT embeddings.
+- Expand tag vocabulary (more tags) while controlling model complexity (strategies: selective inclusion, hierarchy, compression).
+- Collect larger labeled synergy dataset via GUI to replace random negatives with human-labeled negatives and nuanced labels.
+- Explore alternative architectures (dual encoders, contrastive learning, graph-based) and improved training schedules if hardware permits.
 
 Future Work
 -----------
-- Collect larger labeled synergy datasets via GUI.
+- Collect larger labeled synergy datasets via GUI and community labeling.
 - Explore more efficient architectures (e.g., dual encoders, contrastive learning).
 - Investigate graph-based approaches (treat cards as nodes, synergies as edges).
-- Test the two-head MLP embedding split.
-- Experiment with schedulers, warmup strategies, and larger models if hardware permits.
+- Test the two-head MLP embedding split (MultiTaskProjector) in full training runs.
+- Experiment with schedulers, warmup strategies, and larger models when hardware allows.
+- Implement better negative sampling strategies and expand tag set carefully to increase coverage without bloating model complexity.
+
+Notes & Action Items
+--------------------
+- Enforce mutual exclusivity of TagProjector vs. hidden-layer embeddings in configuration and code.
+- Implement Detach and Symmetry toggles as simple boolean switches in model config to enable reproducible experiments.
+- Add utilities to precompute and cache tag embeddings (projected or hidden-layer) to support isolated synergy training without GPU memory pressure.
+- Design experiments to measure: (a) hidden-layer vs. projected tag performance, (b) effect of detaching gradients, (c) effect of symmetry toggle, (d) benefit of MultiTaskProjector.
+- Consider tag compression techniques (hierarchical grouping, autoencoder compression, or frequency cutoff) if tag count expansion causes instability or excessive compute.
+- Replace random negative samples over time with GUI-labeled or heuristically mined negatives to reduce bias.
+
+
