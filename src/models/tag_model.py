@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
 class TagModel(nn.Module):
     def __init__(
         self,
@@ -10,11 +11,11 @@ class TagModel(nn.Module):
         output_dim,
         dropout=0.3,
         use_batchnorm=True,
-        use_sigmoid_output=False
+        use_sigmoid_output=False,
     ):
         """
         Improved tag prediction model with better regularization and flexibility.
-        
+
         Args:
             input_dim: Input embedding size (e.g. from BERT)
             hidden_dims: Tuple of hidden layer sizes
@@ -35,24 +36,28 @@ class TagModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.output = nn.Linear(hidden_dims[1], output_dim)
 
-    def forward(self, x):
+    def forward(self, x, return_hidden=False):
         x = F.leaky_relu(self.bn1(self.fc1(x)))
         x = self.dropout(x)
-        x = F.leaky_relu(self.bn2(self.fc2(x)))
-        x = self.dropout(x)
-        x = self.output(x)
+        hidden = F.leaky_relu(self.bn2(self.fc2(x)))
+        x = self.dropout(hidden)
+        out = self.output(x)
         if self.use_sigmoid_output:
-            return torch.sigmoid(x)
-        return x
-    
+            out = torch.sigmoid(out)
+        if return_hidden:
+            return out, hidden  # hidden ~ dense embedding
+        return out
+
+
 def init_tag_model_weights(m):
     if isinstance(m, nn.Linear):
-        nn.init.kaiming_uniform_(m.weight, nonlinearity='leaky_relu')
+        nn.init.kaiming_uniform_(m.weight, nonlinearity="leaky_relu")
         if m.bias is not None:
             nn.init.zeros_(m.bias)
     elif isinstance(m, nn.BatchNorm1d):
         nn.init.ones_(m.weight)
         nn.init.zeros_(m.bias)
+
 
 def build_tag_model(
     arch_name: str,
@@ -61,18 +66,18 @@ def build_tag_model(
     output_dim: int,
     dropout: float = 0.3,
     use_batchnorm: bool = True,
-    use_sigmoid_output: bool = False
+    use_sigmoid_output: bool = False,
 ):
     if arch_name != "tagModel":
         raise ValueError(f"Unknown tag model architecture: {arch_name}")
-    
+
     model = TagModel(
         input_dim=input_dim,
         hidden_dims=hidden_dims,
         output_dim=output_dim,
         dropout=dropout,
         use_batchnorm=use_batchnorm,
-        use_sigmoid_output=use_sigmoid_output
+        use_sigmoid_output=use_sigmoid_output,
     )
     model.apply(init_tag_model_weights)
     return model

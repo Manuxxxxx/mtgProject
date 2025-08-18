@@ -47,7 +47,22 @@ from src.training_utils.tag_utils import build_training_components_tag
 
 
 def forward_multitask(
-    bert_model, tag_model, tag_projector_model, batch, device, loss_tag_model, tag_hot1, tag_hot2, synergy_model, labels_synergy, loss_synergy_model, false_positive_penalty, use_multitask_projector=False, multitask_projector_model=None
+    bert_model,
+    tag_model,
+    batch,
+    device,
+    loss_tag_model,
+    tag_hot1,
+    tag_hot2,
+    synergy_model,
+    labels_synergy,
+    loss_synergy_model,
+    false_positive_penalty,
+    use_multitask_projector=False,
+    multitask_projector_model=None,
+    use_tag_projector=False,
+    tag_projector_model=None,
+    detach_tag_synergy=False,
 ):
     input_ids1 = batch["input_ids1"].to(device)
     attention_mask1 = batch["attention_mask1"].to(device)
@@ -56,33 +71,55 @@ def forward_multitask(
 
     embed1 = bert_model(input_ids1, attention_mask1)
     embed2 = bert_model(input_ids2, attention_mask2)
-    
+
     bert_tag_embed1 = embed1
     bert_tag_embed2 = embed2
     bert_synergy_embed1 = embed1
     bert_synergy_embed2 = embed2
-    
+
     if use_multitask_projector:
         if multitask_projector_model is None:
-            raise ValueError("multitask_projector_model must be provided when use_multitask_projector is True")
+            raise ValueError(
+                "multitask_projector_model must be provided when use_multitask_projector is True"
+            )
         # Use the multitask projector model to get tag embeddings
-        bert_tag_embed1, bert_tag_embed2 = multitask_projector_model(bert_tag_embed1, bert_tag_embed2)
-        
-        # Use the multitask projector model to get synergy embeddings
-        bert_synergy_embed1, bert_synergy_embed2 = multitask_projector_model(bert_synergy_embed1, bert_synergy_embed2)
+        bert_tag_embed1, bert_synergy_embed1 = multitask_projector_model(embed1)
+        bert_tag_embed2, bert_synergy_embed2 = multitask_projector_model(embed2)
 
-    tags_pred1 = tag_model(bert_tag_embed1)
-    tags_pred2 = tag_model(bert_tag_embed2)
+    tags_pred1, tags_hidden1 = tag_model(bert_tag_embed1, return_hidden=True)
+    tags_pred2, tags_hidden2 = tag_model(bert_tag_embed2, return_hidden=True)
 
     preds_tag1 = torch.sigmoid(tags_pred1)
     preds_tag2 = torch.sigmoid(tags_pred2)
 
-    projected_tag_embed1 = tag_projector_model(preds_tag1.detach())
-    projected_tag_embed2 = tag_projector_model(preds_tag2.detach())
-    
+    if use_tag_projector:
+        if tag_projector_model is None:
+            raise ValueError(
+                "tag_projector_model must be provided when use_tag_projector is True"
+            )
+        # Project the tag embeddings using the tag projector model
+        if detach_tag_synergy:
+            # Detach the tag embeddings if specified
+            projected_tag_embed1 = tag_projector_model(preds_tag1.detach())
+            projected_tag_embed2 = tag_projector_model(preds_tag2.detach())
+        else:
+            # Use the raw predictions for tag embeddings
+            projected_tag_embed1 = tag_projector_model(preds_tag1)
+            projected_tag_embed2 = tag_projector_model(preds_tag2)
+    else:
+        # If not using a tag projector, use the hidden states directly
+        if detach_tag_synergy:
+            # Detach the tag embeddings if specified
+            projected_tag_embed1 = tags_hidden1.detach()
+            projected_tag_embed2 = tags_hidden2.detach()
+        else:
+            # Use the raw predictions for tag embeddings
+            projected_tag_embed1 = tags_hidden1
+            projected_tag_embed2 = tags_hidden2
+
     tag_loss1 = loss_tag_model(tags_pred1, tag_hot1)
     tag_loss2 = loss_tag_model(tags_pred2, tag_hot2)
-    
+
     tag_loss = (tag_loss1 + tag_loss2) / 2.0
     weighted_loss_synergy, preds_synergy = compute_synergy_loss(
         synergy_model,
@@ -139,7 +176,7 @@ def train_tag_loop(
     use_empty_cache=False,
     calc_metrics=False,
     use_multitask_projector=False,
-    multitask_projector_model=None
+    multitask_projector_model=None,
 ):
     tag_model.train()
     bert_model.train()
@@ -160,7 +197,9 @@ def train_tag_loop(
             )
             if use_multitask_projector:
                 if multitask_projector_model is None:
-                    raise ValueError("multitask_projector_model must be provided when use_multitask_projector is True")
+                    raise ValueError(
+                        "multitask_projector_model must be provided when use_multitask_projector is True"
+                    )
                 embed, _ = multitask_projector_model(embed)
             preds_tag = tag_model(embed)
 
@@ -202,7 +241,15 @@ def train_tag_loop(
 
 
 def eval_tag_loop(
-    bert_model, tag_model, dataloader, loss_tag_model, epoch, writer, device, use_multitask_projector=False, multitask_projector_model=None
+    bert_model,
+    tag_model,
+    dataloader,
+    loss_tag_model,
+    epoch,
+    writer,
+    device,
+    use_multitask_projector=False,
+    multitask_projector_model=None,
 ):
     tag_model.eval()
     bert_model.eval()
@@ -220,9 +267,11 @@ def eval_tag_loop(
             )
             if use_multitask_projector:
                 if multitask_projector_model is None:
-                    raise ValueError("multitask_projector_model must be provided when use_multitask_projector is True")
+                    raise ValueError(
+                        "multitask_projector_model must be provided when use_multitask_projector is True"
+                    )
                 embed, _ = multitask_projector_model(embed)
-                
+
             preds_tag = tag_model(embed)
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
@@ -240,7 +289,6 @@ def train_multitask_loop(
     bert_model,
     synergy_model,
     tag_model,
-    tag_projector_model,
     dataloader,
     optimizer,
     loss_synergy_model,
@@ -255,7 +303,10 @@ def train_multitask_loop(
     calc_metrics=False,
     scheduler=None,
     use_multitask_projector=False,
-    multitask_projector_model=None
+    multitask_projector_model=None,
+    use_tag_projector=False,
+    tag_projector_model=None,
+    detach_tag_synergy=False,
 ):
     bert_model.train()
     synergy_model.train()
@@ -273,25 +324,27 @@ def train_multitask_loop(
         tag_hot1, tag_hot2, labels_synergy = get_labels(batch, device)
 
         with autocast(device_type="cuda"):
-            
-            (tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = forward_multitask(
-                bert_model=bert_model,
-                tag_model=tag_model,
-                tag_projector_model=tag_projector_model,
-                batch=batch,
-                device=device,
-                loss_tag_model=loss_tag_model,
-                tag_hot1=tag_hot1,
-                tag_hot2=tag_hot2,
-                synergy_model=synergy_model,
-                labels_synergy=labels_synergy,
-                loss_synergy_model=loss_synergy_model,
-                false_positive_penalty=false_positive_penalty,
-                use_multitask_projector=use_multitask_projector,   
-                multitask_projector_model=multitask_projector_model,
-            )
 
-            
+            (tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = (
+                forward_multitask(
+                    bert_model=bert_model,
+                    tag_model=tag_model,
+                    tag_projector_model=tag_projector_model,
+                    use_tag_projector=use_tag_projector,
+                    batch=batch,
+                    device=device,
+                    loss_tag_model=loss_tag_model,
+                    tag_hot1=tag_hot1,
+                    tag_hot2=tag_hot2,
+                    synergy_model=synergy_model,
+                    labels_synergy=labels_synergy,
+                    loss_synergy_model=loss_synergy_model,
+                    false_positive_penalty=false_positive_penalty,
+                    use_multitask_projector=use_multitask_projector,
+                    multitask_projector_model=multitask_projector_model,
+                    detach_tag_synergy=detach_tag_synergy,
+                )
+            )
 
             # full_loss = weighted_loss_synergy + tag_loss_weight * tag_loss
             loss_scaler = LossScaler()
@@ -356,7 +409,6 @@ def eval_multitask_loop(
     bert_model,
     synergy_model,
     tag_model,
-    tag_projector_model,
     dataloader,
     loss_synergy_model,
     loss_tag_model,
@@ -366,7 +418,10 @@ def eval_multitask_loop(
     label="Val",
     false_positive_penalty=1.0,
     tag_loss_weight=1.0,
-    multitask_projector_model=None
+    multitask_projector_model=None,
+    use_multitask_projector=False,
+    tag_projector_model=None,
+    use_tag_projector=False,
 ):
     bert_model.eval()
     synergy_model.eval()
@@ -381,24 +436,26 @@ def eval_multitask_loop(
         for batch in tqdm(dataloader, desc=f"{label} Eval"):
             tag_hot1, tag_hot2, labels_synergy = get_labels(batch, device)
 
-            ( tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = forward_multitask(
-                bert_model=bert_model,
-                tag_model=tag_model,
-                tag_projector_model=tag_projector_model,
-                batch=batch,
-                device=device,
-                loss_tag_model=loss_tag_model,
-                tag_hot1=tag_hot1,
-                tag_hot2=tag_hot2,
-                synergy_model=synergy_model,
-                labels_synergy=labels_synergy,
-                loss_synergy_model=loss_synergy_model,
-                false_positive_penalty=false_positive_penalty,
-                use_multitask_projector=True,  
-                multitask_projector_model=multitask_projector_model, 
+            (tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = (
+                forward_multitask(
+                    bert_model=bert_model,
+                    tag_model=tag_model,
+                    tag_projector_model=tag_projector_model,
+                    use_tag_projector=use_tag_projector,
+                    batch=batch,
+                    device=device,
+                    loss_tag_model=loss_tag_model,
+                    tag_hot1=tag_hot1,
+                    tag_hot2=tag_hot2,
+                    synergy_model=synergy_model,
+                    labels_synergy=labels_synergy,
+                    loss_synergy_model=loss_synergy_model,
+                    false_positive_penalty=false_positive_penalty,
+                    use_multitask_projector=use_multitask_projector,
+                    multitask_projector_model=multitask_projector_model,
+                    detach_tag_synergy=False,
+                )
             )
-
-
 
             total_synergy_loss += weighted_loss_synergy.item()
             total_tag_loss += tag_loss.item() * tag_loss_weight
@@ -435,7 +492,16 @@ def eval_multitask_loop(
 
 
 def train_tag_model(
-    config, writer, save_full_dir, bert_model, tag_model, tokenizer, device, start_epoch, use_multitask_projector=False, multitask_projector_model=None
+    config,
+    writer,
+    save_full_dir,
+    bert_model,
+    tag_model,
+    tokenizer,
+    device,
+    start_epoch,
+    use_multitask_projector=False,
+    multitask_projector_model=None,
 ):
 
     set_color("blue")
@@ -508,15 +574,21 @@ def train_tag_model(
         prefetch_factor=2,
     )
 
-    print(f"Using tag model with output dimension: {config.get('tag_output_dim', None)}")
+    print(
+        f"Using tag model with output dimension: {config.get('tag_output_dim', None)}"
+    )
     print_separator()
 
-    tag_model_pos_weight = calculate_tag_model_pos_weight(
-        train_dataset, device, config
-    )
+    tag_model_pos_weight = calculate_tag_model_pos_weight(train_dataset, device, config)
 
     optimizer, loss_tag_fn = build_training_components_tag(
-        config, bert_model, tag_model, device, tag_model_pos_weight=tag_model_pos_weight, use_multitask_projector=use_multitask_projector, multitask_projector_model=multitask_projector_model
+        config,
+        bert_model,
+        tag_model,
+        device,
+        tag_model_pos_weight=tag_model_pos_weight,
+        use_multitask_projector=use_multitask_projector,
+        multitask_projector_model=multitask_projector_model,
     )
 
     print_separator()
@@ -555,7 +627,7 @@ def train_tag_model(
             use_empty_cache=config.get("use_empty_cache", False),
             calc_metrics=config.get("train_calc_metrics", False),
             use_multitask_projector=use_multitask_projector,
-            multitask_projector_model=multitask_projector_model
+            multitask_projector_model=multitask_projector_model,
         )
 
         if epoch % config.get("save_every_n_epochs", 1) == 0:
@@ -569,18 +641,28 @@ def train_tag_model(
                 os.path.join(save_full_dir, f"tag_tag_only_model_epoch_{epoch + 1}.pt"),
             )
             print(f"Saved Bert and Tag models at epoch {epoch + 1}.")
-            
+
             if use_multitask_projector and multitask_projector_model is not None:
                 torch.save(
                     multitask_projector_model.state_dict(),
-                    os.path.join(save_full_dir, f"multitask_proj_tag_epoch_{epoch + 1}.pt"),
+                    os.path.join(
+                        save_full_dir, f"multitask_proj_tag_epoch_{epoch + 1}.pt"
+                    ),
                 )
                 print(f"Saved Multitask Projector model at epoch {epoch + 1}.")
 
         print_separator()
         if epoch % config.get("eval_every_n_epochs", 1) == 0:
             eval_tag_loop(
-                bert_model, tag_model, val_loader, loss_tag_fn, epoch, writer, device, use_multitask_projector=use_multitask_projector, multitask_projector_model=multitask_projector_model
+                bert_model,
+                tag_model,
+                val_loader,
+                loss_tag_fn,
+                epoch,
+                writer,
+                device,
+                use_multitask_projector=use_multitask_projector,
+                multitask_projector_model=multitask_projector_model,
             )
 
     print_separator()
@@ -598,13 +680,22 @@ def train_tag_model(
             multitask_projector_model.state_dict(),
             os.path.join(save_full_dir, f"multitask_proj_tag_final.pt"),
         )
-        
+
     print("Final models saved.")
     print_separator()
 
 
 def train_multitask_model(
-    config, writer, save_full_dir, start_epoch, bert_model, tokenizer, device, tag_model, use_multitask_projector=False, multitask_projector_model=None
+    config,
+    writer,
+    save_full_dir,
+    start_epoch,
+    bert_model,
+    tokenizer,
+    device,
+    tag_model,
+    use_multitask_projector=False,
+    multitask_projector_model=None,
 ):
     set_color("green")
 
@@ -660,25 +751,36 @@ def train_multitask_model(
         if use_multitask_projector
         else config["bert_embedding_dim"]
     )
-    
+
     synergy_model = build_synergy_model(
         input_dim=synergy_model_input_dim,
         arch_name=config["synergy_arch"],
         tag_projector_dim=config["tag_projector_output_dim"],
+        hidden_tag_dim=config.get("tag_hidden_dims")[-1],
     ).to(device)
 
     print(f"Using synergy model architecture: {config['synergy_arch']}")
 
-    tag_projector_model = build_tag_projector_model(
-        num_tags=config.get("tag_output_dim"),
-        output_dim=config.get("tag_projector_output_dim"),
-        hidden_dim=config.get("tag_projector_hidden_dim"),
-        dropout=config.get("tag_projector_dropout"),
-    ).to(device)
+    if config.get("use_tag_projector_model", None) is True:
+        use_tag_projector = True
+        tag_projector_model = build_tag_projector_model(
+            num_tags=config.get("tag_output_dim"),
+            output_dim=config.get("tag_projector_output_dim"),
+            hidden_dim=config.get("tag_projector_hidden_dim"),
+            dropout=config.get("tag_projector_dropout"),
+        ).to(device)
+        print(
+            f"Using tag projector model with output dimension: {config.get('tag_projector_output_dim')}"
+        )
+    else:
+        tag_projector_model = None
+        use_tag_projector = False
 
-    print(
-        f"Using tag projector model with output dimension: {config.get('tag_projector_output_dim')}"
-    )
+    # if config["synergy_arch"] contains TagHidden and use_tag_projector is True, then error out
+    if "TagHidden" in config["synergy_arch"] and use_tag_projector:
+        raise ValueError(
+            "Cannot use TagHidden architecture with tag projector model. Please set use_tag_projector to False."
+        )
 
     if config.get("synergy_checkpoint", None) and config["synergy_checkpoint"] != "":
         synergy_model.load_state_dict(torch.load(config["synergy_checkpoint"]))
@@ -687,6 +789,8 @@ def train_multitask_model(
     if (
         config.get("tag_projector_checkpoint", None)
         and config["tag_projector_checkpoint"] != ""
+        and use_tag_projector
+        and tag_projector_model is not None
     ):
         tag_projector_model.load_state_dict(
             torch.load(config["tag_projector_checkpoint"])
@@ -711,9 +815,7 @@ def train_multitask_model(
         )
         print(f"Calculated synergy model pos weight: {synergy_model_pos_weight.item()}")
 
-    tag_model_pos_weight = calculate_tag_model_pos_weight(
-        train_dataset, device, config
-    )
+    tag_model_pos_weight = calculate_tag_model_pos_weight(train_dataset, device, config)
 
     optimizer, loss_sin_fn, loss_tag_fn = build_training_components_multitask(
         config=config,
@@ -724,6 +826,9 @@ def train_multitask_model(
         device=device,
         tag_model_pos_weight=tag_model_pos_weight,
         synergy_model_pos_weight=synergy_model_pos_weight,
+        use_multitask_projector=use_multitask_projector,
+        multitask_projector_model=multitask_projector_model,
+        use_tag_projector=use_tag_projector,
     )
 
     if config.get("use_scheduler", False):
@@ -759,6 +864,7 @@ def train_multitask_model(
                     synergy_model=synergy_model,
                     tag_model=tag_model,
                     tag_projector_model=tag_projector_model,
+                    use_tag_projector=use_tag_projector,
                     dataloader=loader,
                     loss_synergy_model=loss_sin_fn,
                     loss_tag_model=loss_tag_fn,
@@ -769,6 +875,7 @@ def train_multitask_model(
                     false_positive_penalty=config.get("synergy_false_positive_penalty"),
                     tag_loss_weight=config.get("tag_loss_weight"),
                     multitask_projector_model=multitask_projector_model,
+                    use_multitask_projector=use_multitask_projector,
                 )
 
     end_epoch = start_epoch + config.get("epochs_multi", 0)
@@ -783,13 +890,20 @@ def train_multitask_model(
         if freeze_epochs and epoch - start_epoch == freeze_epochs:
             print(f"Unfreezing BERT at epoch {epoch}")
             bert_model.unfreeze_bert()
+            models_with_names = [
+                ("bert_model", bert_model),
+                ("synergy_model", synergy_model),
+                ("tag_model", tag_model),
+            ]
+            if use_multitask_projector and multitask_projector_model is not None:
+                models_with_names.append(
+                    ("multitask_projector_model", multitask_projector_model)
+                )
+            if use_tag_projector and tag_projector_model is not None:
+                models_with_names.append(("tag_projector_model", tag_projector_model))
+
             print_models_param_summary(
-                [
-                    ("bert_model", bert_model),
-                    ("synergy_model", synergy_model),
-                    ("tag_model", tag_model),
-                    ("tag_projector_model", tag_projector_model),
-                ],
+                models_with_names,
                 optimizer,
             )
 
@@ -798,6 +912,7 @@ def train_multitask_model(
             synergy_model=synergy_model,
             tag_model=tag_model,
             tag_projector_model=tag_projector_model,
+            use_tag_projector=use_tag_projector,
             dataloader=train_loader,
             optimizer=optimizer,
             loss_synergy_model=loss_sin_fn,
@@ -813,6 +928,7 @@ def train_multitask_model(
             scheduler=scheduler,
             use_multitask_projector=use_multitask_projector,
             multitask_projector_model=multitask_projector_model,
+            detach_tag_synergy=config.get("detach_tag_synergy", False),
         )
 
         if (epoch + 1) % config["save_every"] == 0:
@@ -826,18 +942,12 @@ def train_multitask_model(
             tag_model_path = os.path.join(
                 save_full_dir, f"tag_multi_model_epoch_{epoch + 1}.pth"
             )
-            tag_projector_model_path = os.path.join(
-                save_full_dir, f"tag_projector_model_epoch_{epoch + 1}.pth"
-            )
 
-            torch.save(tag_projector_model.state_dict(), tag_projector_model_path)
             torch.save(tag_model.state_dict(), tag_model_path)
             torch.save(bert_model.state_dict(), bert_model_path)
             torch.save(synergy_model.state_dict(), synergy_model_path)
-            print(
-                f"Saved Bert, Synergy, Tag, and Tag Projector models at epoch {epoch + 1}."
-            )
-            
+            print(f"Saved Bert, Synergy and Tag models at epoch {epoch + 1}.")
+
             if use_multitask_projector and multitask_projector_model is not None:
                 multitask_projector_model_path = os.path.join(
                     save_full_dir, f"multitask_proj_multi_epoch_{epoch + 1}.pth"
@@ -848,6 +958,13 @@ def train_multitask_model(
                 )
                 print(f"Saved Multitask Projector model at epoch {epoch + 1}.")
 
+            if use_tag_projector and tag_projector_model is not None:
+                tag_projector_model_path = os.path.join(
+                    save_full_dir, f"tag_projector_model_epoch_{epoch + 1}.pth"
+                )
+                torch.save(tag_projector_model.state_dict(), tag_projector_model_path)
+                print(f"Saved Tag Projector model at epoch {epoch + 1}.")
+
         if (epoch + 1) % config["eval_every"] == 0:
             print_separator()
             for split_name, loader in data_loaders.items():
@@ -857,6 +974,7 @@ def train_multitask_model(
                         synergy_model=synergy_model,
                         tag_model=tag_model,
                         tag_projector_model=tag_projector_model,
+                        use_tag_projector=use_tag_projector,
                         dataloader=loader,
                         loss_synergy_model=loss_sin_fn,
                         loss_tag_model=loss_tag_fn,
@@ -869,25 +987,32 @@ def train_multitask_model(
                         ),
                         tag_loss_weight=config.get("tag_loss_weight"),
                         multitask_projector_model=multitask_projector_model,
+                        use_multitask_projector=use_multitask_projector,
                     )
 
     # Final save
     bert_model_path = os.path.join(save_full_dir, "bert_model_final.pth")
     synergy_model_path = os.path.join(save_full_dir, "synergy_model_final.pth")
     tag_model_path = os.path.join(save_full_dir, "tag_model_final.pth")
-    tag_projector_model_path = os.path.join(
-        save_full_dir, "tag_projector_model_final.pth"
-    )
+
     torch.save(bert_model.state_dict(), bert_model_path)
     torch.save(synergy_model.state_dict(), synergy_model_path)
     torch.save(tag_model.state_dict(), tag_model_path)
-    torch.save(tag_projector_model.state_dict(), tag_projector_model_path)
-    
+
+    if use_tag_projector and tag_projector_model is not None:
+        tag_projector_model_path = os.path.join(
+            save_full_dir, "tag_projector_model_final.pth"
+        )
+        torch.save(tag_projector_model.state_dict(), tag_projector_model_path)
+        print(f"Saved Tag Projector model at final save.")
+
     if use_multitask_projector and multitask_projector_model is not None:
         multitask_projector_model_path = os.path.join(
             save_full_dir, "multitask_proj_multi_final.pth"
         )
-        torch.save(multitask_projector_model.state_dict(), multitask_projector_model_path)
+        torch.save(
+            multitask_projector_model.state_dict(), multitask_projector_model_path
+        )
         print(f"Saved Multitask Projector model at final save.")
     print(f"Final models saved at {save_full_dir}")
     writer.close()
@@ -912,7 +1037,7 @@ def run_training_multitask(config):
     embedding_dim = config.get("bert_embedding_dim")
     bert_model, tokenizer, device = build_bert_model(model_name, embedding_dim)
     print(f"Using BERT model: {model_name} with embedding dimension: {embedding_dim}")
-    
+
     use_multitask_projector = config.get("use_multitask_projector", False)
     if use_multitask_projector:
         multitask_projector_model = build_multitask_projector_model(
@@ -928,7 +1053,6 @@ def run_training_multitask(config):
         multitask_projector_model = None
         tag_model_input_dim = embedding_dim
         print("Not using multitask projector model.")
-        
 
     tag_model = build_tag_model(
         "tagModel",

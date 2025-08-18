@@ -15,11 +15,12 @@ def build_training_components_multitask(
     synergy_model,
     device,
     tag_model,
-    tag_projector_model,
+    tag_projector_model=None,
     tag_model_pos_weight=None,
     synergy_model_pos_weight=1.0,
     use_multitask_projector=False,
-    multitask_projector_model=None
+    multitask_projector_model=None,
+    use_tag_projector=False,
 ):
     optimizer = build_multitask_optimizer(
         bert_model=bert_model,
@@ -35,19 +36,21 @@ def build_training_components_multitask(
         use_multitask_projector=use_multitask_projector,
         multitask_projector_model=multitask_projector_model,
         multitasak_proj_lr=config.get("multitask_projector_learning_rate_multi", None),
+        use_tag_projector=use_tag_projector,
     )
 
     models_with_names = [
         ("bert_model", bert_model),
         ("synergy_model", synergy_model),
-        ("tag_projector_model", tag_projector_model),
         ("tag_model", tag_model),
     ]
-    
+
     if use_multitask_projector:
         models_with_names.append(
-        ("multitask_projector_model", multitask_projector_model)
-    )
+            ("multitask_projector_model", multitask_projector_model)
+        )
+    if use_tag_projector:
+        models_with_names.append(("tag_projector_model", tag_projector_model))
 
     print_models_param_summary(models_with_names, optimizer)
 
@@ -82,7 +85,8 @@ def build_multitask_optimizer(
     tag_lr,
     use_multitask_projector=False,
     multitask_projector_model=None,
-    multitasak_proj_lr=None
+    multitasak_proj_lr=None,
+    use_tag_projector=False,
 ):
     param_groups = [
         {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
@@ -91,20 +95,23 @@ def build_multitask_optimizer(
             "lr": synergy_lr,
             "name": "synergy_model",
         },
-        {
-            "params": tag_projector_model.parameters(),
-            "lr": tag_projector_lr,
-            "name": "tag_projector_model",
-        },
         {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
     ]
-    
+
     if use_multitask_projector:
         param_groups.append(
             {
                 "params": multitask_projector_model.parameters(),
                 "lr": multitasak_proj_lr,
                 "name": "multitask_projector_model",
+            }
+        )
+    if use_tag_projector:
+        param_groups.append(
+            {
+                "params": tag_projector_model.parameters(),
+                "lr": tag_projector_lr,
+                "name": "tag_projector_model",
             }
         )
 
