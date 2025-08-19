@@ -170,6 +170,8 @@ def create_tag_dependency_graph(input_file_tagger):
                                 graph.add_edge(
                                     ancestor, tag_name, relationship="inherits"
                                 )
+                                
+                                
 
     # Add usage and source metadata
     for tag in graph.nodes:
@@ -184,6 +186,39 @@ def create_tag_dependency_graph(input_file_tagger):
         graph.nodes[tag]["out_degree"] = graph.out_degree(tag)
 
     return graph
+
+def extract_hierarchy_edges(graph: nx.DiGraph, tag_to_idx: str):
+    """
+    Extracts hierarchy edges (child_idx, parent_idx) for a subset of tags in idx_to_tag_file,
+    based on the full dependency graph.
+
+    Args:
+        graph (nx.DiGraph): Full tag dependency graph.
+        idx_to_tag_file (str): Path to JSON file containing index-to-tag mapping.
+
+    Returns:
+        List[Tuple[int, int]]: List of (child_idx, parent_idx) tuples.
+    """
+    with open(tag_to_idx, "r") as f:
+        tag_to_idx = json.load(f)
+
+    # Convert keys to int if necessary
+    idx_to_tag = {v: k for k, v in tag_to_idx.items()}
+    used_tags = set(tag_to_idx.keys())
+
+    hierarchy_edges = []
+
+    for tag in used_tags:
+        if tag not in graph:
+            continue  # Tag not in full graph
+
+        for parent in graph.predecessors(tag):
+            if parent in used_tags:
+                child_idx = tag_to_idx[tag]
+                parent_idx = tag_to_idx[parent]
+                hierarchy_edges.append((child_idx, parent_idx))
+
+    return hierarchy_edges
 
 
 def extract_all_tags_with_min_freq(tag_data, min_count=20):
@@ -208,14 +243,18 @@ def filter_cards_by_sets(card_data, sets_to_include):
 if __name__ == "__main__":
     MIN_COUNT = 50
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
+    
+        
 
-    # graph = create_tag_dependency_graph(input_file_tagger)
-    # # nx.draw(graph, with_labels=True)
-    # # plt.show()
-    # # save the graph to a file
+    graph = create_tag_dependency_graph(input_file_tagger)
+    print(extract_hierarchy_edges(graph, "datasets/processed/tag_included/tag_to_index_641_20250730155929.json"))
+    
+    # nx.draw(graph, with_labels=True)
+    # plt.show()
+    # save the graph to a file
     # nx.write_graphml(graph, "datasets/scryfallTagger_data/tag_dependency_graph.graphml")
 
-    # exit(0)
+    exit(0)
 
     tag_data = load_tag_data(input_file_tagger)
 

@@ -11,6 +11,7 @@ import time
 import sys
 from torch.amp import autocast, GradScaler
 from transformers import get_linear_schedule_with_warmup
+from torch.nn import functional as F
 
 from src.models.tag_model import build_tag_model
 from src.models.bert_model import build_bert_model
@@ -20,6 +21,8 @@ from src.models.synergy_model import (
 )
 from src.models.tag_projector_model import build_tag_projector_model
 from src.models.multitask_projector_model import build_multitask_projector_model
+
+from src.data_managment.tag_appender import (create_tag_dependency_graph,extract_hierarchy_edges)
 
 from src.training_utils.generic_training_utils import (
     set_color,
@@ -58,11 +61,13 @@ def forward_multitask(
     labels_synergy,
     loss_synergy_model,
     false_positive_penalty,
+    hierarchy_edges,
     use_multitask_projector=False,
     multitask_projector_model=None,
     use_tag_projector=False,
     tag_projector_model=None,
     detach_tag_synergy=False,
+    weight_penalty_ancestors=0.0,
 ):
     input_ids1 = batch["input_ids1"].to(device)
     attention_mask1 = batch["attention_mask1"].to(device)
@@ -91,6 +96,13 @@ def forward_multitask(
 
     preds_tag1 = torch.sigmoid(tags_pred1)
     preds_tag2 = torch.sigmoid(tags_pred2)
+    
+    penalty = 0.0
+    for child, parent in hierarchy_edges:
+        penalty += F.relu(preds_tag1[:, child] - preds_tag1[:, parent]).mean()
+        penalty += F.relu(preds_tag2[:, child] - preds_tag2[:, parent]).mean()
+
+    penalty_ancestors_loss = (penalty / input_ids1.size(0)) * weight_penalty_ancestors
 
     if use_tag_projector:
         if tag_projector_model is None:
@@ -135,6 +147,7 @@ def forward_multitask(
     return (
         tag_loss,
         weighted_loss_synergy,
+        penalty_ancestors_loss,
         preds_synergy,
         preds_tag1,
         preds_tag2,
@@ -154,7 +167,7 @@ def compute_synergy_loss(
     logits_synergy = synergy_model(
         embed1, embed2, projected_tag_embed1, projected_tag_embed2
     )
-    weighted_loss_synergy, preds_synergy, _ = calculate_synergy_weighted_FP_loss(
+    weighted_loss_synergy, preds_synergy = calculate_synergy_weighted_FP_loss(
         logits_synergy,
         labels_synergy,
         loss_synergy_model,
@@ -172,6 +185,8 @@ def train_tag_loop(
     epoch,
     writer,
     device,
+    hierarchy_edges,
+    weight_penalty_ancestors=0.0,
     accumulation_steps=1,
     use_empty_cache=False,
     calc_metrics=False,
@@ -181,6 +196,7 @@ def train_tag_loop(
     tag_model.train()
     bert_model.train()
     total_tag_loss = 0.0
+    total_penalty_ancestors_loss = 0.0
     if calc_metrics:
         all_preds_tag, all_labels_tag = [], []
 
@@ -202,9 +218,15 @@ def train_tag_loop(
                     )
                 embed, _ = multitask_projector_model(embed)
             preds_tag = tag_model(embed)
+            
+            penalty = 0.0
+            for child, parent in hierarchy_edges:
+                penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
+            
+            penalty_ancestors_loss = (penalty / batch["input_ids"].size(0))*weight_penalty_ancestors
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
-            full_loss = tag_loss
+            full_loss = tag_loss + penalty_ancestors_loss
             loss_scaled = full_loss / accumulation_steps
 
         scaler.scale(loss_scaled).backward()
@@ -218,6 +240,7 @@ def train_tag_loop(
                 torch.cuda.empty_cache()
 
         total_tag_loss += tag_loss.item()
+        total_penalty_ancestors_loss += penalty_ancestors_loss.item()
 
         if calc_metrics:
             all_preds_tag.extend(preds_tag.detach().cpu().numpy())
@@ -228,15 +251,17 @@ def train_tag_loop(
         scaler.update()
         optimizer.zero_grad()
 
-    avg_loss = total_tag_loss / len(dataloader)
+    avg_tag_loss = total_tag_loss / len(dataloader)
+    avg_penalty_ancestors_loss = total_penalty_ancestors_loss / len(dataloader)
 
     log_metrics_tag(
-        writer,
-        epoch,
-        avg_loss,
-        all_preds_tag if calc_metrics else [],
-        all_labels_tag if calc_metrics else [],
-        "Train",
+        writer=writer,
+        epoch=epoch,
+        avg_tag_loss=avg_tag_loss,
+        avg_penalty_ancestors_loss=avg_penalty_ancestors_loss,
+        all_preds_tag=all_preds_tag if calc_metrics else [],
+        all_labels_tag=all_labels_tag if calc_metrics else [],
+        label_prefix="Train",
     )
 
 
@@ -248,13 +273,16 @@ def eval_tag_loop(
     epoch,
     writer,
     device,
+    hierarchy_edges,
     use_multitask_projector=False,
     multitask_projector_model=None,
+    weight_penalty_ancestors=0.0,
 ):
     tag_model.eval()
     bert_model.eval()
 
     total_tag_loss = 0.0
+    total_penalty_ancestors_loss = 0.0
     all_preds_tag, all_labels_tag = [], []
 
     with torch.no_grad():
@@ -275,14 +303,32 @@ def eval_tag_loop(
             preds_tag = tag_model(embed)
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
+            penalty = 0.0
+            for child, parent in hierarchy_edges:
+                penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
+            
+            penalty_ancestors_loss = (penalty / batch["input_ids"].size(0)) * weight_penalty_ancestors
+            
+            total_penalty_ancestors_loss += penalty_ancestors_loss.item()
+            
             total_tag_loss += tag_loss.item()
 
             all_preds_tag.extend(preds_tag.cpu().numpy())
             all_labels_tag.extend(tag_hot.cpu().numpy())
 
     avg_loss = total_tag_loss / len(dataloader)
+    avg_penalty_ancestors_loss = total_penalty_ancestors_loss / len(dataloader)
 
-    log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, "Val")
+    log_metrics_tag(
+        writer=writer,
+        epoch=epoch,
+        avg_tag_loss=avg_loss,
+        avg_penalty_ancestors_loss=avg_penalty_ancestors_loss,
+        all_preds_tag=all_preds_tag,
+        all_labels_tag=all_labels_tag,
+        label_prefix="Val"
+    )
+    
 
 
 def train_multitask_loop(
@@ -296,6 +342,7 @@ def train_multitask_loop(
     epoch,
     writer,
     device,
+    hierarchy_edges,
     false_positive_penalty=1.0,
     tag_loss_weight=1,
     accumulation_steps=1,
@@ -307,12 +354,14 @@ def train_multitask_loop(
     use_tag_projector=False,
     tag_projector_model=None,
     detach_tag_synergy=False,
+    weight_penalty_ancestors=0.0
 ):
     bert_model.train()
     synergy_model.train()
     tag_model.train()
     total_synergy_loss = 0.0
     total_tag_loss = 0.0
+    total_penalty_ancestors_loss = 0.0
     if calc_metrics:
         all_preds_synergy, all_labels_synergy = [], []
         all_preds_tag, all_labels_tag = [], []
@@ -325,7 +374,7 @@ def train_multitask_loop(
 
         with autocast(device_type="cuda"):
 
-            (tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = (
+            (tag_loss, weighted_loss_synergy, penalty_ancestors_loss, preds_synergy, preds_tag1, preds_tag2) = (
                 forward_multitask(
                     bert_model=bert_model,
                     tag_model=tag_model,
@@ -342,7 +391,9 @@ def train_multitask_loop(
                     false_positive_penalty=false_positive_penalty,
                     use_multitask_projector=use_multitask_projector,
                     multitask_projector_model=multitask_projector_model,
-                    detach_tag_synergy=detach_tag_synergy,
+                    detach_tag_synergy=detach_tag_synergy,    
+                    hierarchy_edges=hierarchy_edges,
+                    weight_penalty_ancestors=weight_penalty_ancestors
                 )
             )
 
@@ -351,6 +402,7 @@ def train_multitask_loop(
             full_loss, scale_factor = loss_scaler.get_scaled_total_loss(
                 tag_loss, weighted_loss_synergy, alpha=tag_loss_weight
             )
+            full_loss += penalty_ancestors_loss
             loss_scaled = full_loss / accumulation_steps
 
         scaler.scale(loss_scaled).backward()
@@ -365,6 +417,7 @@ def train_multitask_loop(
 
         total_synergy_loss += weighted_loss_synergy.item()
         total_tag_loss += tag_loss.item() * tag_loss_weight
+        total_penalty_ancestors_loss += penalty_ancestors_loss.item()
 
         if calc_metrics:
             update_metrics_multi(
@@ -390,6 +443,7 @@ def train_multitask_loop(
     avg_loss = (total_tag_loss + total_synergy_loss) / len(dataloader)
     avg_synergy_loss = total_synergy_loss / len(dataloader)
     avg_tag_loss = total_tag_loss / len(dataloader)
+    avg_penalty_ancestors_loss = total_penalty_ancestors_loss / len(dataloader)
 
     log_metrics_multitask(
         writer,
@@ -401,6 +455,7 @@ def train_multitask_loop(
         all_labels_synergy if calc_metrics else [],
         all_preds_tag if calc_metrics else [],
         all_labels_tag if calc_metrics else [],
+        avg_penalty_ancestors_loss,
         "Train",
     )
 
@@ -415,6 +470,7 @@ def eval_multitask_loop(
     epoch,
     writer,
     device,
+    hierarchy_edges,
     label="Val",
     false_positive_penalty=1.0,
     tag_loss_weight=1.0,
@@ -422,6 +478,8 @@ def eval_multitask_loop(
     use_multitask_projector=False,
     tag_projector_model=None,
     use_tag_projector=False,
+    weight_penalty_ancestors=0.0
+    
 ):
     bert_model.eval()
     synergy_model.eval()
@@ -429,6 +487,7 @@ def eval_multitask_loop(
 
     total_synergy_loss = 0.0
     total_tag_loss = 0.0
+    total_penalty_ancestors_loss = 0.0
     all_preds_synergy, all_labels_synergy = [], []
     all_preds_tag, all_labels_tag = [], []
 
@@ -436,7 +495,12 @@ def eval_multitask_loop(
         for batch in tqdm(dataloader, desc=f"{label} Eval"):
             tag_hot1, tag_hot2, labels_synergy = get_labels(batch, device)
 
-            (tag_loss, weighted_loss_synergy, preds_synergy, preds_tag1, preds_tag2) = (
+            (tag_loss,
+                weighted_loss_synergy,
+                penalty_ancestors_loss,
+                preds_synergy,
+                preds_tag1,
+                preds_tag2,) = (
                 forward_multitask(
                     bert_model=bert_model,
                     tag_model=tag_model,
@@ -454,11 +518,14 @@ def eval_multitask_loop(
                     use_multitask_projector=use_multitask_projector,
                     multitask_projector_model=multitask_projector_model,
                     detach_tag_synergy=False,
+                    hierarchy_edges=hierarchy_edges,
+                    weight_penalty_ancestors=weight_penalty_ancestors
                 )
             )
 
             total_synergy_loss += weighted_loss_synergy.item()
             total_tag_loss += tag_loss.item() * tag_loss_weight
+            total_penalty_ancestors_loss += penalty_ancestors_loss.item()
 
             update_metrics_multi(
                 all_preds_synergy,
@@ -487,7 +554,8 @@ def eval_multitask_loop(
         all_labels_synergy,
         all_preds_tag,
         all_labels_tag,
-        label,
+        avg_penalty_ancestors_loss=total_penalty_ancestors_loss / len(dataloader),
+        label_prefix=label,
     )
 
 
@@ -500,8 +568,10 @@ def train_tag_model(
     tokenizer,
     device,
     start_epoch,
+    hierarchy_edges,
     use_multitask_projector=False,
     multitask_projector_model=None,
+    
 ):
 
     set_color("blue")
@@ -556,7 +626,7 @@ def train_tag_model(
 
     train_loader = DataLoader(
         train_dataset,
-        batch_size=config["batch_size"],
+        batch_size=config["batch_size_tag"],
         shuffle=True,
         drop_last=True,
         num_workers=2,
@@ -566,7 +636,7 @@ def train_tag_model(
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=config["batch_size"],
+        batch_size=config["batch_size_tag"],
         shuffle=False,
         drop_last=False,
         num_workers=2,
@@ -628,6 +698,8 @@ def train_tag_model(
             calc_metrics=config.get("train_calc_metrics", False),
             use_multitask_projector=use_multitask_projector,
             multitask_projector_model=multitask_projector_model,
+            hierarchy_edges=hierarchy_edges,
+            weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0),
         )
 
         if epoch % config.get("save_every_n_epochs", 1) == 0:
@@ -663,6 +735,8 @@ def train_tag_model(
                 device,
                 use_multitask_projector=use_multitask_projector,
                 multitask_projector_model=multitask_projector_model,
+                hierarchy_edges=hierarchy_edges,
+                weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0)
             )
 
     print_separator()
@@ -694,8 +768,10 @@ def train_multitask_model(
     tokenizer,
     device,
     tag_model,
+    hierarchy_edges,
     use_multitask_projector=False,
     multitask_projector_model=None,
+
 ):
     set_color("green")
 
@@ -753,7 +829,7 @@ def train_multitask_model(
     )
 
     synergy_model = build_synergy_model(
-        input_dim=synergy_model_input_dim,
+        embedding_dim=synergy_model_input_dim,
         arch_name=config["synergy_arch"],
         tag_projector_dim=config["tag_projector_output_dim"],
         hidden_tag_dim=config.get("tag_hidden_dims")[-1],
@@ -876,6 +952,8 @@ def train_multitask_model(
                     tag_loss_weight=config.get("tag_loss_weight"),
                     multitask_projector_model=multitask_projector_model,
                     use_multitask_projector=use_multitask_projector,
+                    hierarchy_edges=hierarchy_edges,
+                    weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0)
                 )
 
     end_epoch = start_epoch + config.get("epochs_multi", 0)
@@ -929,6 +1007,8 @@ def train_multitask_model(
             use_multitask_projector=use_multitask_projector,
             multitask_projector_model=multitask_projector_model,
             detach_tag_synergy=config.get("detach_tag_synergy", False),
+            hierarchy_edges=hierarchy_edges,
+            weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0),
         )
 
         if (epoch + 1) % config["save_every"] == 0:
@@ -988,6 +1068,8 @@ def train_multitask_model(
                         tag_loss_weight=config.get("tag_loss_weight"),
                         multitask_projector_model=multitask_projector_model,
                         use_multitask_projector=use_multitask_projector,
+                        hierarchy_edges=hierarchy_edges,
+                        weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0)
                     )
 
     # Final save
@@ -1029,7 +1111,15 @@ def run_training_multitask(config):
 
     # Set up directories and writer
     writer, save_full_dir, start_epoch = setup_dirs_writer(config)
+    
+    print("Setting up Hierarchy of tags...")
+    hierarchy_edges = extract_hierarchy_edges(create_tag_dependency_graph(config.get("tag_bulk_file", None)), config.get("tag_to_index_file", None))
+    
+    #print first 10 edges of hierarchy
+    print(f"Hierarchy edges (first 10): {hierarchy_edges[:10]}")
 
+    print_separator()
+    
     # Initialize BERT model and tokenizer
     print("Loading BERT model and tokenizer...")
     # Step 2: Initialize BERT model and tokenizer
@@ -1096,6 +1186,7 @@ def run_training_multitask(config):
             start_epoch,
             use_multitask_projector=use_multitask_projector,
             multitask_projector_model=multitask_projector_model,
+            hierarchy_edges=hierarchy_edges
         )
     else:
 
@@ -1113,14 +1204,15 @@ def run_training_multitask(config):
         print(f"Loaded tag model checkpoint: {config['tag_checkpoint_multi']}")
 
     train_multitask_model(
-        config,
-        writer,
-        save_full_dir,
-        start_epoch + config.get("epochs_tag", 0),
-        bert_model,
-        tokenizer,
-        device,
-        tag_model,
+        config=config,
+        writer=writer,
+        save_full_dir=save_full_dir,
+        start_epoch=start_epoch + config.get("epochs_tag", 0),
+        bert_model=bert_model,
+        tokenizer=tokenizer,
+        device=device,
+        tag_model=tag_model,
+        hierarchy_edges=hierarchy_edges,
         use_multitask_projector=use_multitask_projector,
         multitask_projector_model=multitask_projector_model,
     )

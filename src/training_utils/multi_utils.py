@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.data import DataLoader
 
 from src.training_utils.datasets import JointCardDataset
 from src.training_utils.generic_training_utils import (

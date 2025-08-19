@@ -5,7 +5,7 @@ import os
 import shutil
 import json
 
-def log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_loss, all_preds_synergy, all_labels_synergy, all_preds_tag, all_labels_tag, label_prefix="Train"):
+def log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_loss, all_preds_synergy, all_labels_synergy, all_preds_tag, all_labels_tag, avg_penalty_ancestors_loss, label_prefix="Train"):
     writer.add_scalar(f"{label_prefix}/Loss", avg_loss, epoch)
     writer.add_scalar(f"{label_prefix}/Synergy Loss", avg_synergy_loss, epoch)
 
@@ -27,10 +27,11 @@ def log_metrics_multitask(writer, epoch, avg_loss, avg_synergy_loss, avg_tag_los
     writer.add_scalar(f"{label_prefix}_cmSin/FP", cm_synergy[0, 1], epoch)
     writer.add_scalar(f"{label_prefix}_cmSin/FN", cm_synergy[1, 0], epoch)
 
-    log_metrics_tag(writer, epoch, avg_tag_loss, all_preds_tag, all_labels_tag, label_prefix)
+    log_metrics_tag(writer, epoch, avg_tag_loss, avg_penalty_ancestors_loss, all_preds_tag, all_labels_tag, label_prefix)
 
-def log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, label_prefix="Train"):
-    writer.add_scalar(f"{label_prefix}/Tag Loss", avg_loss, epoch)
+def log_metrics_tag(writer, epoch, avg_tag_loss, avg_penalty_ancestors_loss, all_preds_tag, all_labels_tag, label_prefix="Train"):
+    writer.add_scalar(f"{label_prefix}/Tag Loss", avg_tag_loss, epoch)
+    writer.add_scalar(f"{label_prefix}/Penalty Ancestors", avg_penalty_ancestors_loss, epoch)
     binary_preds_tag = np.array(all_preds_tag) > 0.5
 
     # print(f"shape of all_preds_tag: {np.array(all_preds_tag).shape}")
@@ -59,7 +60,7 @@ def log_metrics_tag(writer, epoch, avg_loss, all_preds_tag, all_labels_tag, labe
     f1_tag = f1_score(all_labels_tag, binary_preds_tag, average='macro', zero_division=0)
     cm_tag = confusion_matrix(np.array(all_labels_tag).flatten(), binary_preds_tag.flatten())
 
-    print(f"{label_prefix} [{epoch+1}]| Tag Loss: {avg_loss:.4f} | Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
+    print(f"{label_prefix} [{epoch+1}]| Tag Loss: {avg_tag_loss:.4f} | Penalty Anc Loss: {avg_penalty_ancestors_loss:.4f} | Precision Tag: {precision_tag:.4f} | Recall Tag: {recall_tag:.4f} | F1 Tag: {f1_tag:.4f} |")
 
     writer.add_scalar(f"{label_prefix}_tag/Precision", precision_tag, epoch)
     writer.add_scalar(f"{label_prefix}_tag/Recall", recall_tag, epoch)

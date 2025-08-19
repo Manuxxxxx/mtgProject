@@ -227,7 +227,9 @@ def calculate_tag_model_pos_weight(train_dataset, device, config):
         tag_model_pos_weight = (neg_counts / (tag_counts + 1e-6)).to(
             device
         )  # avoid div-by-zero
-        print(f"Calculated tag model pos weight: {tag_model_pos_weight}")
+        
+        # print first 10 values of tag_model_pos_weight
+        print(f"Tag model pos weight (first 10 values): {tag_model_pos_weight[:10]}")
     return tag_model_pos_weight
 
 def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
@@ -244,16 +246,16 @@ def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
         else:
             alpha = None
 
-        loss_tag_fn = FocalLoss(alpha=alpha, gamma=config.get("focal_gamma", 2.0)).to(
+        loss_tag_fn = FocalLoss(alpha=alpha, gamma=config.get("focal_gamma", None)).to(
             device
         )
-
-        print(
-            "Using Focal Loss for tag model with alpha:",
-            alpha,
-            "and gamma:",
-            config.get("focal_gamma", 2.0),
-        )
+        #print first 10 values of alpha
+        if alpha is not None:
+            print(f"Focal Loss alpha (first 10 values): {alpha[:10]}")
+        else:
+            print("Focal Loss alpha: None (default behavior)")
+        #print gamma value
+        print(f"Using Focal Loss with gamma: {config.get('focal_gamma', None)}")
 
     else:
         # Use weighted BCE

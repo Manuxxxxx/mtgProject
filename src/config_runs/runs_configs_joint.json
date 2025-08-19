@@ -47,6 +47,8 @@
         "synergy_pos_weight": null,
         "synergy_false_positive_penalty": 3.0,
 
+        "weight_penalty_ancestors": 1e-2,
+
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
         "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
         "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_641_20250730155929.json",
@@ -131,6 +133,8 @@
         "synergy_pos_weight": null,
         "synergy_false_positive_penalty": 3.0,
 
+        "weight_penalty_ancestors": 1e-2,
+
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
         "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
         "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_641_20250730155929.json",
@@ -214,6 +218,9 @@
 
         "synergy_pos_weight": null,
         "synergy_false_positive_penalty": 3.0,
+
+
+        "weight_penalty_ancestors": 1e-2,
 
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
         "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
@@ -308,6 +315,9 @@
 
         "synergy_pos_weight": null,
         "synergy_false_positive_penalty": 3.0,
+
+
+        "weight_penalty_ancestors": 1e-2,
 
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
         "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
