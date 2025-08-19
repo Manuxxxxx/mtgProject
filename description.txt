@@ -4,7 +4,7 @@ Project Log – MTG Commander Synergy & Tag Prediction System
 Objective
 ---------
 - Build a recommender system that suggests cards to add to a partially completed Commander deck in Magic: The Gathering (MTG).
-- Commander decks require exactly 100 singleton cards (no duplicates), and synergy is highly contextual.
+- Commander decks require exactly 100 singleton cards (no duplicates, excluding basic lands and specific cards), and synergy is highly contextual.
 - A simple tool was also built that suggests the most synergistic cards for a given partial deck and commander, using a weighted average of synergy scores.
 - Synergy is defined as how two cards work well together, improving each other.
 
@@ -41,14 +41,13 @@ Tag Model
 - Tag prediction is difficult due to class imbalance (many rare tags, min count threshold of 50 used).
 - Hierarchical penalties were explored to enforce consistency in tag predictions (parent > child probabilities).
 
-Tag Projector (Legacy)
+Tag Projector (Optional)
 - Maps predicted tag probabilities (multi-hot vectors of ~variable tag count) into dense embeddings.
-- hidden_dim = 256, output_dim = 128.
 - Rationale: passing dense embeddings into the synergy model instead of raw binary vectors.
 - Design is experimental — unclear whether binary tags should be projected or used directly.
-- Now made optional in the updated architecture (can be disabled when using hidden-layer embeddings).
+- can be disabled when using hidden-layer embeddings for synergy model.
 
-Tag Hidden Layer Integration (NEW / integrated)
+Tag Hidden Layer Integration 
 - The synergy model can now optionally receive the hidden-layer embeddings from the tag prediction model instead of using a separate projected tag vector.
 - This eliminates the need for a dedicated TagProjector when using hidden-layer embeddings.
 - Constraint: the hidden-layer approach and the TagProjector are mutually exclusive — use one or the other, not both simultaneously.
@@ -75,7 +74,7 @@ MultiTaskProjector (Optional)
   - Synergy head embedding — fed directly into the Synergy Model.
 - Goal: avoid forcing a single shared embedding to serve both tasks and assess whether specialized embeddings improve performance.
 
-Configurable Components & Toggles (NEW / integrated)
+Configurable Components & Toggles 
 - MultiTaskProjector: optional splitting of embeddings into task-specific heads.
 - TagProjector: legacy module that projects predicted tags into a dense embedding for the synergy model; now optional.
 - Detach toggle: allows tag embeddings (projected or hidden-layer) to be detached from the computation graph before being passed to the Synergy Model. This prevents gradients from flowing back into the Tag Model and enables isolated training of the Synergy Model.
