@@ -241,7 +241,7 @@ def filter_cards_by_sets(card_data, sets_to_include):
 
 
 if __name__ == "__main__":
-    MIN_COUNT = 150
+    MIN_COUNT = 300
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     
         

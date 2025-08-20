@@ -223,7 +223,7 @@ def train_tag_loop(
             for child, parent in hierarchy_edges:
                 penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
             
-            penalty_ancestors_loss = (penalty / batch["input_ids"].size(0))*weight_penalty_ancestors
+            penalty_ancestors_loss = penalty * weight_penalty_ancestors
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
             full_loss = tag_loss + penalty_ancestors_loss
@@ -307,7 +307,7 @@ def eval_tag_loop(
             for child, parent in hierarchy_edges:
                 penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
             
-            penalty_ancestors_loss = (penalty / batch["input_ids"].size(0)) * weight_penalty_ancestors
+            penalty_ancestors_loss = penalty * weight_penalty_ancestors
             
             total_penalty_ancestors_loss += penalty_ancestors_loss.item()
             
@@ -702,7 +702,7 @@ def train_tag_model(
             weight_penalty_ancestors=config.get("weight_penalty_ancestors", 0.0),
         )
 
-        if epoch % config.get("save_every_n_epochs", 1) == 0:
+        if (epoch + 1) % config["save_every"] == 0:
 
             torch.save(
                 bert_model.state_dict(),
