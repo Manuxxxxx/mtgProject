@@ -3,6 +3,7 @@ import random
 import numpy as np
 import json
 import torch
+from torch import nn
 
 from src.training_utils import bert_parsing
 from src.models.losses.focal_loss import FocalLoss
@@ -223,11 +224,12 @@ def calculate_tag_model_pos_weight(train_dataset, device, config):
         tag_counts = train_dataset.tag_counts  # shape: (tags_len,)
         total = train_dataset.total_tag_samples  # scalar
 
+        
         neg_counts = total - tag_counts  # how many times each tag is not present
         tag_model_pos_weight = (neg_counts / (tag_counts + 1e-6)).to(
             device
         )  # avoid div-by-zero
-        
+        # print(f"Tag counts: {tag_counts}, Total samples: {total}, neg_counts: {neg_counts}")
         # print first 10 values of tag_model_pos_weight
         print(f"Tag model pos weight (first 10 values): {tag_model_pos_weight[:10]}")
     return tag_model_pos_weight
@@ -261,8 +263,7 @@ def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
         # Use weighted BCE
         loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
         print(
-            "Using weighted BCE Loss for tag model with pos_weight:",
-            tag_model_pos_weight,
+            "Using weighted BCE Loss for tag model with pos_weight (first 10 values):", tag_model_pos_weight[:10]
         )
 
     return loss_tag_fn

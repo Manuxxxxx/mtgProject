@@ -241,20 +241,20 @@ def filter_cards_by_sets(card_data, sets_to_include):
 
 
 if __name__ == "__main__":
-    MIN_COUNT = 50
+    MIN_COUNT = 150
     input_file_tagger = "datasets/scryfallTagger_data/store_scrapped_ancestors.json"
     
         
 
-    graph = create_tag_dependency_graph(input_file_tagger)
-    print(extract_hierarchy_edges(graph, "datasets/processed/tag_included/tag_to_index_641_20250730155929.json"))
+    # graph = create_tag_dependency_graph(input_file_tagger)
+    # print(extract_hierarchy_edges(graph, "datasets/processed/tag_included/tag_to_index_641_20250730155929.json"))
     
     # nx.draw(graph, with_labels=True)
     # plt.show()
     # save the graph to a file
     # nx.write_graphml(graph, "datasets/scryfallTagger_data/tag_dependency_graph.graphml")
 
-    exit(0)
+    # exit(0)
 
     tag_data = load_tag_data(input_file_tagger)
 
