@@ -576,7 +576,7 @@ def train_tag_model(
 
     set_color("blue")
 
-    bert_model.unfreeze_bert()
+    bert_model.unfreeze_all()
 
     # --- Freeze BERT based on config ---
     freeze_epochs = config.get("freeze_bert_epochs_tag", None)
@@ -586,12 +586,12 @@ def train_tag_model(
         print(
             f"Freezing all BERT layers for tag model training, for {freeze_epochs} epochs."
         )
-        bert_model.freeze_bert()
+        bert_model.freeze_all()
     elif isinstance(freeze_layers, int):
         print(
             f"Freezing the first {freeze_layers} BERT layers for tag model training, for {freeze_epochs} epochs."
         )
-        bert_model.freeze_bert_layers(freeze_layers)
+        bert_model.freeze_encoder_layers(freeze_layers)
 
     with open(config["bulk_file"], "r") as f:
         bulk_data = json.load(f)
@@ -678,7 +678,7 @@ def train_tag_model(
         # Unfreeze BERT when freeze period is over
         if freeze_epochs and epoch - start_epoch == freeze_epochs:
             print(f"Unfreezing BERT at epoch {epoch}")
-            bert_model.unfreeze_bert()
+            bert_model.unfreeze_all()
             print_models_param_summary(
                 [("bert_model", bert_model), ("tag_model", tag_model)], optimizer
             )
@@ -724,7 +724,7 @@ def train_tag_model(
                 print(f"Saved Multitask Projector model at epoch {epoch + 1}.")
 
         print_separator()
-        if epoch % config.get("eval_every_n_epochs", 1) == 0:
+        if (epoch + 1) % config["eval_every"] == 0:
             eval_tag_loop(
                 bert_model,
                 tag_model,
@@ -775,7 +775,7 @@ def train_multitask_model(
 ):
     set_color("green")
 
-    bert_model.unfreeze_bert()  # Ensure BERT is unfrozen for multitask training
+    bert_model.unfreeze_all()  # Ensure BERT is unfrozen for multitask training
 
     print_separator()
     print("Starting Multitask Model Training")
@@ -792,12 +792,12 @@ def train_multitask_model(
         print(
             f"Freezing all BERT layers for tag model training, for {freeze_epochs} epochs."
         )
-        bert_model.freeze_bert()
+        bert_model.freeze_all()
     elif isinstance(freeze_layers, int):
         print(
             f"Freezing the first {freeze_layers} BERT layers for tag model training, for {freeze_epochs} epochs."
         )
-        bert_model.freeze_bert_layers(freeze_layers)
+        bert_model.freeze_encoder_layers(freeze_layers)
 
     # Define split proportions
     if config.get("splits", None) is not None:
@@ -967,7 +967,7 @@ def train_multitask_model(
 
         if freeze_epochs and epoch - start_epoch == freeze_epochs:
             print(f"Unfreezing BERT at epoch {epoch}")
-            bert_model.unfreeze_bert()
+            bert_model.unfreeze_all()
             models_with_names = [
                 ("bert_model", bert_model),
                 ("synergy_model", synergy_model),
