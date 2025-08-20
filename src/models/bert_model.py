@@ -9,41 +9,41 @@ from transformers import (
 # ----------------------
 # Model
 # ----------------------
-class EmbedRegressor(nn.Module):
+class BertEmbedRegressor(nn.Module):
     def __init__(self, output_dim, model_name):
         super().__init__()
         self.model_name = model_name
 
         if model_name == "bert-base-uncased":
             print("Using BertModel")
-            self.encoder = BertModel.from_pretrained("bert-base-uncased")
+            self.bert = BertModel.from_pretrained("bert-base-uncased")
 
         elif model_name == "distilbert-base-uncased":
             print("Using DistilBertModel")
-            self.encoder = DistilBertModel.from_pretrained("distilbert-base-uncased")
+            self.bert = DistilBertModel.from_pretrained("distilbert-base-uncased")
 
         elif model_name == "microsoft/deberta-v3-small":
             print("Using DeBERTa-v3-small")
-            self.encoder = AutoModel.from_pretrained("microsoft/deberta-v3-small")
+            self.bert = AutoModel.from_pretrained("microsoft/deberta-v3-small")
 
         elif model_name == "roberta-base":
             print("Using RoBERTa-base")
-            self.encoder = AutoModel.from_pretrained("roberta-base")
+            self.bert = AutoModel.from_pretrained("roberta-base")
 
         elif model_name == "sentence-transformers/all-MiniLM-L6-v2":
             print("Using MiniLM (Sentence-Transformers)")
-            self.encoder = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+            self.bert = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
         else:
             raise ValueError(f"Model {model_name} is not supported for this task.")
 
-        hidden_size = self.encoder.config.hidden_size
+        hidden_size = self.bert.config.hidden_size
         self.layer_norm = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(0.2)
         self.linear = nn.Linear(hidden_size, output_dim)
 
     def forward(self, input_ids, attention_mask):
-        outputs = self.encoder(input_ids=input_ids, attention_mask=attention_mask)
+        outputs = self.bert(input_ids=input_ids, attention_mask=attention_mask)
 
         # Different models expose outputs differently
         if self.model_name == "bert-base-uncased":
@@ -63,64 +63,64 @@ class EmbedRegressor(nn.Module):
     # ----------------------
     # Freezing helpers
     # ----------------------
+    def _get_transformer_layers(self):
+        """
+        Return the ModuleList of transformer layers for the current HF model.
+        Works for BERT/DeBERTa/RoBERTa/MiniLM/DistilBERT.
+        """
+        # BERT / RoBERTa / DeBERTa / MiniLM variants
+        if hasattr(self.bert, "encoder") and hasattr(self.bert.encoder, "layer"):
+            return self.bert.encoder.layer
+        # DistilBERT
+        if hasattr(self.bert, "transformer") and hasattr(self.bert.transformer, "layer"):
+            return self.bert.transformer.layer
+        raise ValueError(f"Unsupported transformer structure for model: {self.model_name}")
+
+    def _freeze_embeddings(self):
+        emb = getattr(self.bert, "embeddings", None)
+        if emb is not None:
+            for p in emb.parameters():
+                p.requires_grad = False
+
     def freeze_encoder_layers(self, freeze_until_layer):
         """
-        Freeze encoder layers up to (but not including) freeze_until_layer.
+        Freeze embeddings and encoder layers up to (but not including) freeze_until_layer.
         """
-        if self.model_name == "bert-base-uncased":
-            for param in self.encoder.embeddings.parameters():
-                param.requires_grad = False
-            for i, layer in enumerate(self.encoder.encoder.layer):
-                if i < freeze_until_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = False
+        # Always freeze embeddings for stability
+        self._freeze_embeddings()
 
-        elif self.model_name == "distilbert-base-uncased":
-            for param in self.encoder.embeddings.parameters():
-                param.requires_grad = False
-            for i, layer in enumerate(self.encoder.transformer.layer):
-                if i < freeze_until_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = False
+        layers = self._get_transformer_layers()
+        for i, layer in enumerate(layers):
+            if i < freeze_until_layer:
+                for p in layer.parameters():
+                    p.requires_grad = False
 
-        elif self.model_name in ["microsoft/deberta-v3-small", "roberta-base", "sentence-transformers/all-MiniLM-L6-v2"]:
-            for i, layer in enumerate(self.encoder.encoder.layer):
-                if i < freeze_until_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = False
-        else:
-            raise ValueError(f"Unsupported model: {self.model_name}")
-
-    def unfreeze_encoder_layers(self, start_layer=0):
+    def unfreeze_encoder_layers(self, start_layer=0, unfreeze_embeddings=False):
         """
         Unfreeze encoder layers starting from start_layer.
+        Set unfreeze_embeddings=True to also unfreeze embeddings.
         """
-        if self.model_name == "bert-base-uncased":
-            for i, layer in enumerate(self.encoder.encoder.layer):
-                if i >= start_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = True
+        if unfreeze_embeddings:
+            emb = getattr(self.bert, "embeddings", None)
+            if emb is not None:
+                for p in emb.parameters():
+                    p.requires_grad = True
 
-        elif self.model_name == "distilbert-base-uncased":
-            for i, layer in enumerate(self.encoder.transformer.layer):
-                if i >= start_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = True
+        layers = self._get_transformer_layers()
+        for i, layer in enumerate(layers):
+            if i >= start_layer:
+                for p in layer.parameters():
+                    p.requires_grad = True
 
-        elif self.model_name in ["microsoft/deberta-v3-small", "roberta-base", "sentence-transformers/all-MiniLM-L6-v2"]:
-            for i, layer in enumerate(self.encoder.encoder.layer):
-                if i >= start_layer:
-                    for param in layer.parameters():
-                        param.requires_grad = True
-        else:
-            raise ValueError(f"Unsupported model: {self.model_name}")
+    def num_encoder_layers(self):
+        return len(self._get_transformer_layers())
 
     def freeze_all(self):
-        for param in self.encoder.parameters():
+        for param in self.bert.parameters():
             param.requires_grad = False
 
     def unfreeze_all(self):
-        for param in self.encoder.parameters():
+        for param in self.bert.parameters():
             param.requires_grad = True
 
 
@@ -135,7 +135,7 @@ def build_bert_model(model_name, embedding_dim):
 
     else:
         # DeBERTa, RoBERTa, MiniLM, etc.
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False)
 
-    model = EmbedRegressor(output_dim=embedding_dim, model_name=model_name).to(device)
+    model = BertEmbedRegressor(output_dim=embedding_dim, model_name=model_name).to(device)
     return model, tokenizer, device

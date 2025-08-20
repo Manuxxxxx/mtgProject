@@ -217,11 +217,12 @@ def train_tag_loop(
                         "multitask_projector_model must be provided when use_multitask_projector is True"
                     )
                 embed, _ = multitask_projector_model(embed)
-            preds_tag = tag_model(embed)
+            preds_tag = tag_model(embed)  # logits
+            probs_tag = torch.sigmoid(preds_tag)  # probabilities for penalty/metrics
             
             penalty = 0.0
             for child, parent in hierarchy_edges:
-                penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
+                penalty += F.relu(probs_tag[:, child] - probs_tag[:, parent]).mean()
             
             penalty_ancestors_loss = penalty * weight_penalty_ancestors
 
@@ -300,12 +301,15 @@ def eval_tag_loop(
                     )
                 embed, _ = multitask_projector_model(embed)
 
-            preds_tag = tag_model(embed)
-
-            tag_loss = loss_tag_model(preds_tag, tag_hot)
+            
+            preds_tag = tag_model(embed)  # logits
+            probs_tag = torch.sigmoid(preds_tag)  # probabilities for penalty/metrics
+            
             penalty = 0.0
             for child, parent in hierarchy_edges:
-                penalty += F.relu(preds_tag[:, child] - preds_tag[:, parent]).mean()
+                penalty += F.relu(probs_tag[:, child] - probs_tag[:, parent]).mean()
+
+            tag_loss = loss_tag_model(preds_tag, tag_hot)
             
             penalty_ancestors_loss = penalty * weight_penalty_ancestors
             

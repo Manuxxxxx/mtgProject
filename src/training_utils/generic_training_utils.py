@@ -240,31 +240,32 @@ def get_loss_tag_fn(config, device, tag_model_pos_weight=None):
     If use_focal is True, use FocalLoss; otherwise, use weighted BCE.
     """
     if config.get("use_focal", False):
-        # Use FocalLoss, normalize alpha if provided
+        # alpha from pos_weight (map w to [0,1]), then clamp to avoid extremes
         if tag_model_pos_weight is not None:
-            alpha = (
-                tag_model_pos_weight / tag_model_pos_weight.max()
-            )  # Normalize to 0–1
+            pos_w = tag_model_pos_weight.to(device=device, dtype=torch.float)
+            if config.get("focal_alpha_from_pos_weight", True):
+                alpha = (pos_w / (pos_w + 1.0)).clamp_(0.1, 0.9)
+            else:
+                alpha = None  # use default alpha
         else:
+            pos_w = None
             alpha = None
 
-        loss_tag_fn = FocalLoss(alpha=alpha, gamma=config.get("focal_gamma", None)).to(
-            device
-        )
-        #print first 10 values of alpha
+        gamma = config.get("focal_gamma", 2.0)
+        loss_tag_fn = FocalLoss(alpha=alpha, gamma=gamma, pos_weight=pos_w).to(device)
+
         if alpha is not None:
             print(f"Focal Loss alpha (first 10 values): {alpha[:10]}")
         else:
             print("Focal Loss alpha: None (default behavior)")
-        #print gamma value
-        print(f"Using Focal Loss with gamma: {config.get('focal_gamma', None)}")
+        print(f"Using Focal Loss with gamma: {gamma}")
 
     else:
         # Use weighted BCE
-        loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=tag_model_pos_weight).to(device)
-        print(
-            "Using weighted BCE Loss for tag model with pos_weight (first 10 values):", tag_model_pos_weight[:10]
-        )
+        pos_w = None if tag_model_pos_weight is None else tag_model_pos_weight.to(device)
+        loss_tag_fn = nn.BCEWithLogitsLoss(pos_weight=pos_w).to(device)
+        if pos_w is not None:
+            print("Using weighted BCE Loss for tag model with pos_weight (first 10 values):", pos_w[:10])
 
     return loss_tag_fn
 

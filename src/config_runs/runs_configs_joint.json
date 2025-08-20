@@ -9,16 +9,16 @@
         "start_epoch": 0,
         "run_name_previous": null,
 
-        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_175138/bert_tag_only_epoch_5.pt",
-        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_175138/tag_tag_only_model_epoch_5.pt",
+        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_222839/bert_tag_only_epoch_12.pt",
+        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_222839/tag_tag_only_model_epoch_12.pt",
 
         "bert_checkpoint_multi": null,
         "tag_checkpoint_multi": null,
         "synergy_checkpoint": null,
         "tag_projector_checkpoint": null,
 
-        "freeze_bert_epochs_tag": 10,
-        "freeze_bert_layers_tag": 4,
+        "freeze_bert_epochs_tag": 20,
+        "freeze_bert_layers_tag": 6,
         "freeze_bert_epochs_multi": 20,
         "freeze_bert_layers_multi": 6,
 
@@ -26,13 +26,13 @@
         "epochs_tag": 30,
 
         "batch_size": 5,
-        "batch_size_tag": 8,
+        "batch_size_tag": 50,
         "accumulation_steps": 1,
         "use_empty_cache": false,
         "eval_every": 3,
         "save_every": 2,
 
-        "bert_model_name": "microsoft/deberta-v3-small",
+        "bert_model_name": "distilbert-base-uncased",
         "bert_learning_rate_multi": 1e-5,
         "bert_learning_rate_tag": 5e-5,
 
@@ -48,7 +48,7 @@
         "synergy_pos_weight": null,
         "synergy_false_positive_penalty": 3.0,
 
-        "weight_penalty_ancestors": 0.2,
+        "weight_penalty_ancestors": 1,
         "tag_bulk_file": "datasets/scryfallTagger_data/store_scrapped_ancestors.json",
 
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
@@ -75,7 +75,8 @@
         "tag_loss_weight": 0.5,
         "tag_dropout": 0.3,
         "use_focal": true,
-        "focal_gamma": 2.0,
+        "focal_gamma": 3.0,
+        "focal_alpha_from_pos_weight": false,
         "tag_use_sigmoid_output": false,
 
         "use_multitask_projector": false,

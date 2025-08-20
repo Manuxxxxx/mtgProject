@@ -6,6 +6,7 @@ import json
 import numpy as np
 
 from src.training_utils import bert_parsing
+from src.training_utils.generic_training_utils import print_separator
 
 
 class CardDataset(Dataset):
@@ -19,6 +20,11 @@ class CardDataset(Dataset):
         tag_to_index_file=None,
     ):
 
+        print_separator()
+        print(f"Initializing CardDataset with {len(card_data)} cards.")
+        print(f"Max length for tokenization: {max_length}")
+        print(f"Tags length: {tags_len}")
+        print(f"Dataset name: {dataset_name}")
         self.tokenizer = tokenizer
         self.data = card_data
         self.max_length = max_length
@@ -50,6 +56,7 @@ class CardDataset(Dataset):
         self.tag_counts = torch.zeros(self.tags_len, dtype=torch.float32)
         self.total_tag_samples = 0
 
+        
         for card in self.data:
             tag_vec = self.hot_encode_tags(card)  # shape: (tags_len,)
             tag_vec = tag_vec.to(torch.float32)  # convert to float32
@@ -58,6 +65,13 @@ class CardDataset(Dataset):
                 self.total_tag_samples += 1
 
             card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
+            
+        #count the average number of tags per card
+        if self.total_tag_samples > 0:
+            avg_tags_per_card = self.tag_counts.sum().item() / self.total_tag_samples
+            print(f"Average tags per card: {avg_tags_per_card:.2f}")
+        else:
+            print("No tags found in the dataset.")
             
         # for tag in self.tag_to_index:
         #     # print tag_count for each tag
@@ -166,6 +180,13 @@ class JointCardDataset(Dataset):
                         self.total_tag_samples += 1
 
                     card["tag_hot"] = tag_vec  # Add tag hot encoding to card data
+                    
+        #count the average number of tags per card
+        if self.total_tag_samples > 0:
+            avg_tags_per_card = self.tag_counts.sum().item() / self.total_tag_samples
+            print(f"Average tags per card: {avg_tags_per_card:.2f}")
+        else:
+            print("No tags found in the dataset.")
 
         self.calculate_synergy_counts()
         if debug_dataset:
