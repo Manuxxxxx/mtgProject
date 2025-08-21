@@ -9,8 +9,8 @@
         "start_epoch": 0,
         "run_name_previous": null,
 
-        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_234641/bert_tag_only_epoch_20.pt",
-        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_234641/tag_tag_only_model_epoch_20.pt",
+        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_014802/bert_tag_only_epoch_4.pt",
+        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_014802/tag_tag_only_model_epoch_4.pt",
 
         "bert_checkpoint_multi": null,
         "tag_checkpoint_multi": null,
@@ -106,24 +106,26 @@
         "synergy_checkpoint": null,
         "tag_projector_checkpoint": null,
 
-        "freeze_bert_epochs_tag": 20,
-        "freeze_bert_layers_tag": 5,
-        "freeze_bert_epochs_multi": 20,
-        "freeze_bert_layers_multi": 5,
+        "freeze_bert_epochs_tag": 15,
+        "freeze_bert_layers_tag": 4,
+        "freeze_bert_epochs_multi": 15,
+        "freeze_bert_layers_multi": 4,
 
-        "epochs_multi": 30,
-        "epochs_tag": 30,
+        "epochs_multi": 50,
+        "epochs_tag": 50,
 
         "batch_size": 5,
-        "batch_size_tag": 20,
+        "batch_size_tag": 10,
         "accumulation_steps": 4,
         "use_empty_cache": false,
-        "eval_every": 1,
-        "save_every": 1,
+        "eval_every": 4,
+        "save_every": 3,
 
-        "bert_model_name": "distilbert-base-uncased",
+        "bert_model_name": "microsoft/deberta-v3-small",
         "bert_learning_rate_multi": 1e-5,
-        "bert_learning_rate_tag": 2e-5,
+        "bert_head_learning_rate_multi": 5e-4,
+        "bert_learning_rate_tag": 1e-5,
+        "bert_head_learning_rate_tag": 5e-4,
 
         "bert_embedding_dim": 384,
         "max_length_bert_tokenizer": 256,
@@ -135,23 +137,23 @@
         "optimizer_config": {},
 
         "synergy_pos_weight": null,
-        "synergy_false_positive_penalty": 3.0,
+        "synergy_false_positive_penalty": 4.0,
 
-        "weight_penalty_ancestors": 0.2,
+        "weight_penalty_ancestors": 1,
         "tag_bulk_file": "datasets/scryfallTagger_data/store_scrapped_ancestors.json",
 
         "synergy_file": "edhrec_data/labeled/with_random/random_real_synergies.json",
-        "bulk_file": "datasets/processed/tag_included/cards_with_tags_641_20250730155929.json",
-        "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_641_20250730155929.json",
+        "bulk_file": "datasets/processed/tag_included/cards_with_tags_174_20250820145339.json",
+        "tag_to_index_file": "datasets/processed/tag_included/tag_to_index_174_20250820145339.json",
         "log_dir": "runs/two_phase_joint",
         "save_dir": "checkpoints/two_phase_joint",
 
         "splits_tag": {
-            "train": 0.4,
+            "train": 0.3,
             "val": 0.1
         },
         "splits": {
-            "train": { "real": 0.5, "fake": 0.2 },
+            "train": { "real": 0.6, "fake": 0.3 },
             "val_real": { "real": 0.1, "fake": 0.0 },
             "val_real_fake": { "real": 0.1, "fake": 0.03 }
         },
@@ -159,13 +161,14 @@
         "tag_learning_rate_tag": 5e-4,
         "tag_learning_rate_multi": 1e-4,
 
+        "tag_arch": "attention",
         "tag_hidden_dims": [512, 256],
-        "tag_output_dim": 641,
-        "tag_loss_weight": 0.5,
+        "tag_output_dim": 174,
         "tag_dropout": 0.3,
+        "tag_use_batchnorm": true,
+        "tag_use_sigmoid_output": false,
         "use_focal": true,
         "focal_gamma": 2.0,
-        "tag_use_sigmoid_output": false,
 
         "use_multitask_projector": false,
 

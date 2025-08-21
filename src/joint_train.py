@@ -96,13 +96,19 @@ def forward_multitask(
 
     preds_tag1 = torch.sigmoid(tags_pred1)
     preds_tag2 = torch.sigmoid(tags_pred2)
-    
-    penalty = 0.0
-    for child, parent in hierarchy_edges:
-        penalty += F.relu(preds_tag1[:, child] - preds_tag1[:, parent]).mean()
-        penalty += F.relu(preds_tag2[:, child] - preds_tag2[:, parent]).mean()
 
-    penalty_ancestors_loss = (penalty / input_ids1.size(0)) * weight_penalty_ancestors
+    # Vectorized hierarchy penalty across both items; average over batch and edges
+    if hierarchy_edges and len(hierarchy_edges) > 0:
+        child_idx = torch.tensor([c for c, _ in hierarchy_edges], device=preds_tag1.device)
+        parent_idx = torch.tensor([p for _, p in hierarchy_edges], device=preds_tag1.device)
+        diff1 = preds_tag1.index_select(1, child_idx) - preds_tag1.index_select(1, parent_idx)
+        diff2 = preds_tag2.index_select(1, child_idx) - preds_tag2.index_select(1, parent_idx)
+        diff = torch.cat([diff1, diff2], dim=0)
+        penalty = F.relu(diff).mean()
+    else:
+        penalty = torch.tensor(0.0, device=preds_tag1.device)
+
+    penalty_ancestors_loss = penalty * weight_penalty_ancestors
 
     if use_tag_projector:
         if tag_projector_model is None:
@@ -200,6 +206,13 @@ def train_tag_loop(
     if calc_metrics:
         all_preds_tag, all_labels_tag = [], []
 
+    # Precompute edge indices once
+    if hierarchy_edges and len(hierarchy_edges) > 0:
+        child_idx = torch.tensor([c for c, _ in hierarchy_edges], device=device)
+        parent_idx = torch.tensor([p for _, p in hierarchy_edges], device=device)
+    else:
+        child_idx = parent_idx = None
+
     scaler = GradScaler()
     optimizer.zero_grad()
 
@@ -219,11 +232,14 @@ def train_tag_loop(
                 embed, _ = multitask_projector_model(embed)
             preds_tag = tag_model(embed)  # logits
             probs_tag = torch.sigmoid(preds_tag)  # probabilities for penalty/metrics
-            
-            penalty = 0.0
-            for child, parent in hierarchy_edges:
-                penalty += F.relu(probs_tag[:, child] - probs_tag[:, parent]).mean()
-            
+
+            # Vectorized hierarchy penalty; average over batch and edges
+            if child_idx is not None:
+                diff = probs_tag.index_select(1, child_idx) - probs_tag.index_select(1, parent_idx)
+                penalty = F.relu(diff).mean()
+            else:
+                penalty = torch.tensor(0.0, device=probs_tag.device)
+
             penalty_ancestors_loss = penalty * weight_penalty_ancestors
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
@@ -244,7 +260,8 @@ def train_tag_loop(
         total_penalty_ancestors_loss += penalty_ancestors_loss.item()
 
         if calc_metrics:
-            all_preds_tag.extend(preds_tag.detach().cpu().numpy())
+            # Store probabilities for metrics
+            all_preds_tag.extend(probs_tag.detach().cpu().numpy())
             all_labels_tag.extend(tag_hot.cpu().numpy())
 
     if (step + 1) % accumulation_steps != 0:
@@ -286,6 +303,13 @@ def eval_tag_loop(
     total_penalty_ancestors_loss = 0.0
     all_preds_tag, all_labels_tag = [], []
 
+    # Precompute edge indices once
+    if hierarchy_edges and len(hierarchy_edges) > 0:
+        child_idx = torch.tensor([c for c, _ in hierarchy_edges], device=device)
+        parent_idx = torch.tensor([p for _, p in hierarchy_edges], device=device)
+    else:
+        child_idx = parent_idx = None
+
     with torch.no_grad():
         for batch in tqdm(dataloader, desc="Eval Tag"):
             tag_hot = batch["tag_hot"].to(device)
@@ -301,23 +325,24 @@ def eval_tag_loop(
                     )
                 embed, _ = multitask_projector_model(embed)
 
-            
             preds_tag = tag_model(embed)  # logits
             probs_tag = torch.sigmoid(preds_tag)  # probabilities for penalty/metrics
-            
-            penalty = 0.0
-            for child, parent in hierarchy_edges:
-                penalty += F.relu(probs_tag[:, child] - probs_tag[:, parent]).mean()
+
+            # Vectorized hierarchy penalty; average over batch and edges
+            if child_idx is not None:
+                diff = probs_tag.index_select(1, child_idx) - probs_tag.index_select(1, parent_idx)
+                penalty = F.relu(diff).mean()
+            else:
+                penalty = torch.tensor(0.0, device=probs_tag.device)
 
             tag_loss = loss_tag_model(preds_tag, tag_hot)
-            
             penalty_ancestors_loss = penalty * weight_penalty_ancestors
-            
+
             total_penalty_ancestors_loss += penalty_ancestors_loss.item()
-            
             total_tag_loss += tag_loss.item()
 
-            all_preds_tag.extend(preds_tag.cpu().numpy())
+            # Store probabilities for metrics
+            all_preds_tag.extend(probs_tag.cpu().numpy())
             all_labels_tag.extend(tag_hot.cpu().numpy())
 
     avg_loss = total_tag_loss / len(dataloader)
@@ -332,7 +357,6 @@ def eval_tag_loop(
         all_labels_tag=all_labels_tag,
         label_prefix="Val"
     )
-    
 
 
 def train_multitask_loop(
@@ -1148,8 +1172,11 @@ def run_training_multitask(config):
         tag_model_input_dim = embedding_dim
         print("Not using multitask projector model.")
 
+    tag_arch = config.get("tag_arch", None)  # "tagModel", "residual", "attention"
+    if tag_arch is None:
+        raise ValueError("{tag_arch} must be specified in the config.")
     tag_model = build_tag_model(
-        "tagModel",
+        tag_arch,
         input_dim=tag_model_input_dim,
         output_dim=config.get("tag_output_dim"),
         hidden_dims=config.get("tag_hidden_dims"),
@@ -1157,6 +1184,7 @@ def run_training_multitask(config):
         use_batchnorm=config.get("tag_use_batchnorm"),
         use_sigmoid_output=config.get("tag_use_sigmoid_output"),
     ).to(device)
+    print(f"Using tag model arch: {tag_arch} | hidden_dims: {config.get('tag_hidden_dims')}")
 
     # Train the tag model if specified
     if config.get("train_tag_model", False):

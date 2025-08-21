@@ -29,6 +29,7 @@ def build_training_components_multitask(
         tag_projector_model=tag_projector_model,
         tag_model=tag_model,
         bert_lr=config["bert_learning_rate_multi"],
+        bert_head_lr=config.get("bert_head_learning_rate_multi", config["bert_learning_rate_multi"]),
         synergy_lr=config["synergy_learning_rate"],
         tag_projector_lr=config["tag_projector_learning_rate"],
         tag_lr=config["tag_learning_rate_multi"],
@@ -88,9 +89,11 @@ def build_multitask_optimizer(
     multitask_projector_model=None,
     multitasak_proj_lr=None,
     use_tag_projector=False,
+    bert_head_lr=None,
 ):
     param_groups = [
-        {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
+        {"params": bert_model.backbone_parameters(), "lr": bert_lr, "name": "bert_backbone"},
+        {"params": bert_model.head_parameters(), "lr": (bert_head_lr or bert_lr), "name": "bert_head"},
         {
             "params": synergy_model.parameters(),
             "lr": synergy_lr,

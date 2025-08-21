@@ -17,6 +17,7 @@ def build_training_components_tag(
         bert_model=bert_model,
         tag_lr=config["tag_learning_rate_tag"],
         bert_lr=config["bert_learning_rate_tag"],
+        bert_head_lr=config.get("bert_head_learning_rate_tag", config["bert_learning_rate_tag"]),
         optimizer_config=config.get("optimizer_config", {}),
         use_multitask_projector=use_multitask_projector,
         multitask_projector_model=multitask_projector_model,
@@ -43,11 +44,13 @@ def build_training_components_tag(
 
 
 def build_tag_optimizer(
-    optimizer_name, tag_model, bert_model, tag_lr, bert_lr, optimizer_config, use_multitask_projector=False, multitask_projector_model=None, multitasak_proj_lr=None
+    optimizer_name, tag_model, bert_model, tag_lr, bert_lr, optimizer_config, use_multitask_projector=False, multitask_projector_model=None, multitasak_proj_lr=None, bert_head_lr=None
 ):
+    # Split BERT into backbone vs head with different LRs
     param_groups = [
         {"params": tag_model.parameters(), "lr": tag_lr, "name": "tag_model"},
-        {"params": bert_model.parameters(), "lr": bert_lr, "name": "bert_model"},
+        {"params": bert_model.backbone_parameters(), "lr": bert_lr, "name": "bert_backbone"},
+        {"params": bert_model.head_parameters(), "lr": (bert_head_lr or bert_lr), "name": "bert_head"},
     ]
     
     if use_multitask_projector:

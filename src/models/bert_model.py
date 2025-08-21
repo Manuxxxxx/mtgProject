@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from itertools import chain
 from transformers import (
     BertTokenizer, BertModel,
     DistilBertTokenizer, DistilBertModel,
@@ -59,6 +60,27 @@ class BertEmbedRegressor(nn.Module):
             raise ValueError(f"Unsupported model: {self.model_name}")
 
         return self.linear(self.dropout(self.layer_norm(cls_emb)))
+
+    # ----------------------
+    # Optimizer param group helpers (backbone vs head)
+    # ----------------------
+    def backbone_parameters(self):
+        """Iterator of backbone (transformer) params."""
+        return self.bert.parameters()
+
+    def head_parameters(self):
+        """Iterator of head params (norm + projection)."""
+        # dropout has no params
+        return chain(self.layer_norm.parameters(), self.linear.parameters())
+
+    def get_parameter_groups(self, lr_backbone, lr_head, weight_decay=0.0):
+        """
+        Convenience helper to build optimizer param groups with different LRs.
+        """
+        return [
+            {"params": self.backbone_parameters(), "lr": lr_backbone, "weight_decay": weight_decay, "name": "bert_backbone"},
+            {"params": self.head_parameters(), "lr": lr_head, "weight_decay": weight_decay, "name": "bert_head"},
+        ]
 
     # ----------------------
     # Freezing helpers
