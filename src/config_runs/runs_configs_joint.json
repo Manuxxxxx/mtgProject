@@ -9,16 +9,16 @@
         "start_epoch": 0,
         "run_name_previous": null,
 
-        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_222839/bert_tag_only_epoch_12.pt",
-        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_222839/tag_tag_only_model_epoch_12.pt",
+        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_234641/bert_tag_only_epoch_20.pt",
+        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250820_234641/tag_tag_only_model_epoch_20.pt",
 
         "bert_checkpoint_multi": null,
         "tag_checkpoint_multi": null,
         "synergy_checkpoint": null,
         "tag_projector_checkpoint": null,
 
-        "freeze_bert_epochs_tag": 20,
-        "freeze_bert_layers_tag": 6,
+        "freeze_bert_epochs_tag": 0,
+        "freeze_bert_layers_tag": 0,
         "freeze_bert_epochs_multi": 20,
         "freeze_bert_layers_multi": 6,
 
@@ -26,7 +26,7 @@
         "epochs_tag": 30,
 
         "batch_size": 5,
-        "batch_size_tag": 50,
+        "batch_size_tag": 10,
         "accumulation_steps": 1,
         "use_empty_cache": false,
         "eval_every": 3,
