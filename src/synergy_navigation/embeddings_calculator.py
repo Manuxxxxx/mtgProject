@@ -12,19 +12,28 @@ from src.models.tag_projector_model import build_tag_projector_model
 
 BERT_MODEL_NAME = "distilbert-base-uncased"
 EMBEDDING_DIM = 384
-MAX_LEN = 280
-BERT_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/bert_multi_model_epoch_18.pth"
+MAX_LEN = 256
+BERT_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/bert_multi_model_epoch_36.pth"
 
-TAG_HIDDEN_DIMS = [512, 256]
-TAG_OUTPUT_DIM = 103
+# "tag_hidden_dims": [512, 512],
+        # "tag_output_dim": 174,
+        # "tag_loss_weight": 0.5,
+        # "tag_dropout": 0.3,
+        # "use_focal": true,
+        # "focal_gamma": 3.0,
+        # "focal_alpha_from_pos_weight": false,
+        # "tag_use_sigmoid_output": false,
+        # "tag_arch": "simple",
+TAG_HIDDEN_DIMS = [512, 512]
+TAG_OUTPUT_DIM = 174
 TAG_DROPOUT = 0.3
 TAG_USE_SIGMOID_OUTPUT = True
-TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/tag_multi_model_epoch_18.pth"
+TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/tag_multi_model_epoch_36.pth"
 
-TAG_PROJECTOR_OUTPUT_DIM = 64
-TAG_PROJECTOR_HIDDEN_DIM = 32
-TAG_PROJECTOR_DROPOUT = 0.3
-TAG_PROJECTOR_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/tag_projector_model_epoch_18.pth"
+# TAG_PROJECTOR_OUTPUT_DIM = 64
+# TAG_PROJECTOR_HIDDEN_DIM = 32
+# TAG_PROJECTOR_DROPOUT = 0.3
+# TAG_PROJECTOR_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint_training_tag_20250717_122452/tag_projector_model_epoch_18.pth"
 
 
 def get_embedding_from_card(card, model, tokenizer, device):
@@ -46,13 +55,17 @@ def get_embedding_from_card(card, model, tokenizer, device):
         return None
 
 
-def get_tags_and_projection_from_emb(emb, tag_model, tag_projector_model, device):
+def get_tags_and_projection_from_emb(emb, tag_model, tag_projector_model=None, device=None):
     """
     Given an embedding, calculates the tags and their projection.
     Returns a tuple of (tags, projection).
     """
     emb_tensor = torch.tensor(emb, dtype=torch.float32).unsqueeze(0).to(device)
 
+    if tag_projector_model is None:
+        with torch.no_grad():
+            tags = tag_model(emb_tensor)
+        return tags.cpu().numpy(), None
     with torch.no_grad():
         tags = tag_model(emb_tensor)
         projection = tag_projector_model(tags)
@@ -94,16 +107,17 @@ def load_bulk_file(bulk_file):
 
 
 def create_embedding_file(
-    bulk_file, save_every=2000, calculate_tags=False, output_file=None
+    bulk_file, save_every=2000, calculate_tags=False, output_file=None, use_tag_projector=False, use_multitask_projector=False, tag_arch="simple"
 ):
     model, tokenizer, device = build_bert_model(BERT_MODEL_NAME, EMBEDDING_DIM)
     model.load_state_dict(torch.load(BERT_CHECKPOINT_FILE))
     model.eval()
 
     if calculate_tags:
-        print("Calculating tags and tags projector")
+        print("Calculating tags...")        
+        
         tag_model = build_tag_model(
-            arch_name="tagModel",
+            tag_arch,
             input_dim=EMBEDDING_DIM,
             hidden_dims=TAG_HIDDEN_DIMS,
             output_dim=TAG_OUTPUT_DIM,
@@ -113,15 +127,19 @@ def create_embedding_file(
         ).to(device)
         tag_model.load_state_dict(torch.load(TAG_CHECKPOINT_FILE))
         tag_model.eval()
+        
+        if use_tag_projector or use_multitask_projector:
+            print("Using tag projector...")
+            print("not implemented yet")
 
-        tag_projector_model = build_tag_projector_model(
-            num_tags=TAG_OUTPUT_DIM,
-            hidden_dim=TAG_PROJECTOR_HIDDEN_DIM,
-            output_dim=TAG_PROJECTOR_OUTPUT_DIM,
-            dropout=TAG_PROJECTOR_DROPOUT,
-        ).to(device)
-        tag_projector_model.load_state_dict(torch.load(TAG_PROJECTOR_CHECKPOINT_FILE))
-        tag_projector_model.eval()
+            # tag_projector_model = build_tag_projector_model(
+            #     num_tags=TAG_OUTPUT_DIM,
+            #     hidden_dim=TAG_PROJECTOR_HIDDEN_DIM,
+            #     output_dim=TAG_PROJECTOR_OUTPUT_DIM,
+            #     dropout=TAG_PROJECTOR_DROPOUT,
+            # ).to(device)
+            # tag_projector_model.load_state_dict(torch.load(TAG_PROJECTOR_CHECKPOINT_FILE))
+            # tag_projector_model.eval()
 
     cards = load_bulk_file(bulk_file)
     counter_save = 0
@@ -131,10 +149,10 @@ def create_embedding_file(
             card["emb_predicted"] = card_emb.tolist()
             if calculate_tags:
                 tags, projection = get_tags_and_projection_from_emb(
-                    card_emb, tag_model, tag_projector_model, device
+                    card_emb, tag_model, None, device
                 )
                 card["tags_predicted"] = tags.tolist()
-                card["tags_preds_projection"] = projection.tolist()
+                # card["tags_preds_projection"] = projection.tolist()
         else:
             # error handling
             print(f"Error processing card: {card.get('name', 'Unknown')}")
@@ -160,11 +178,12 @@ def create_embedding_file(
 if __name__ == "__main__":
     time = time.strftime("%Y%m%d%H%M%S")
     os.makedirs("datasets/processed/embedding_predicted/joint_tag", exist_ok=True)
+    N_TAGS = 174
     output_file = (
-        f"datasets/processed/embedding_predicted/joint_tag/cards_with_tags_{time}.json"
+        f"datasets/processed/embedding_predicted/joint_tag/cards_with_tags_{N_TAGS}_{time}.json"
     )
     create_embedding_file(
-        "datasets/processed/tag_included/cards_with_tags_103_20250627182008.json",
+        "datasets/processed/tag_included/cards_with_tags_174_20250820145339.json",
         save_every=5000,
         output_file=output_file,
         calculate_tags=True,
