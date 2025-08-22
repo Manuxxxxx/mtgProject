@@ -76,6 +76,7 @@
         "tag_dropout": 0.3,
         "use_focal": true,
         "focal_gamma": 3.0,
+        "tag_use_batchnorm": false,
         "focal_alpha_from_pos_weight": false,
         "tag_use_sigmoid_output": false,
         "tag_arch": "simple",

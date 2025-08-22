@@ -851,7 +851,7 @@ def train_multitask_model(
     train_loader = data_loaders["train"]
 
     synergy_model_input_dim = (
-        config["multitask_projector_tag_dim"]
+        config["multitask_projector_synergy_dim"]
         if use_multitask_projector
         else config["bert_embedding_dim"]
     )
@@ -1165,6 +1165,9 @@ def run_training_multitask(config):
             hidden_dim=config.get("multitask_projector_hidden_dim"),
             dropout=config.get("multitask_projector_dropout"),
         ).to(device)
+        if config.get("multitask_projector_checkpoint"):
+            multitask_projector_model.load_state_dict(torch.load(config["multitask_projector_checkpoint"]))
+            print(f"Loaded multitask projector checkpoint: {config['multitask_projector_checkpoint']}")
         tag_model_input_dim = config.get("multitask_projector_tag_dim")
         print(f"Using multitask projector model ")
     else:
