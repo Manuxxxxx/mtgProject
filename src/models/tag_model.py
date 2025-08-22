@@ -171,3 +171,81 @@ def build_tag_model(
     # Optional: apply init
     model.apply(init_tag_model_weights)
     return model
+
+
+def load_legacy_tag_weights(new_model, ckpt_path, device):
+    """
+    Load checkpoints saved with old TagModel that used layer names:
+      fc1.weight / fc1.bias
+      fc2.weight / fc2.bias
+      (optionally fc3...) 
+      output.weight / output.bias
+    Map them to new:
+      blocks.{i}.fc.weight / blocks.{i}.fc.bias
+      output_layer.weight / output_layer.bias
+
+    Falls back silently (logs) if shapes differ or layers count changed.
+    """
+    sd = torch.load(ckpt_path, map_location=device)
+    # Allow either direct state_dict or wrapped
+    if isinstance(sd, dict) and "state_dict" in sd:
+        sd = sd["state_dict"]
+    old_sd = sd
+
+    new_sd = new_model.state_dict()
+
+    # Collect old hidden layer names in order (fc1, fc2, ...)
+    old_hidden_layers = []
+    for k in old_sd.keys():
+        if k.startswith("fc") and (k.endswith(".weight") or k.endswith(".bias")):
+            # extract index after 'fc'
+            try:
+                idx = int(k[2:k.index(".")])
+                old_hidden_layers.append((idx, k))
+            except ValueError:
+                pass
+    # Group by layer index
+    max_idx = 0
+    layer_params = {}
+    for idx, k in old_hidden_layers:
+        layer_params.setdefault(idx, {})
+        if k.endswith(".weight"):
+            layer_params[idx]["weight"] = old_sd[k]
+        else:
+            layer_params[idx]["bias"] = old_sd[k]
+        max_idx = max(max_idx, idx)
+
+    # Sort by index (fc1, fc2, ...)
+    ordered_layers = [layer_params[i] for i in sorted(layer_params.keys())]
+
+    # Map each old fc{i} to blocks.{i-1}.fc
+    applied = []
+    for i, layer in enumerate(ordered_layers):
+        target_w = f"blocks.{i}.fc.weight"
+        target_b = f"blocks.{i}.fc.bias"
+        if "weight" in layer and target_w in new_sd and new_sd[target_w].shape == layer["weight"].shape:
+            new_sd[target_w] = layer["weight"]
+            applied.append(f"{target_w} <- fc{i+1}.weight")
+        if "bias" in layer and target_b in new_sd and new_sd[target_b].shape == layer["bias"].shape:
+            new_sd[target_b] = layer["bias"]
+            applied.append(f"{target_b} <- fc{i+1}.bias")
+
+    # Output layer mapping
+    if "output.weight" in old_sd and "output_layer.weight" in new_sd and new_sd["output_layer.weight"].shape == old_sd["output.weight"].shape:
+        new_sd["output_layer.weight"] = old_sd["output.weight"]
+        applied.append("output_layer.weight <- output.weight")
+    if "output.bias" in old_sd and "output_layer.bias" in new_sd and new_sd["output_layer.bias"].shape == old_sd["output.bias"].shape:
+        new_sd["output_layer.bias"] = old_sd["output.bias"]
+        applied.append("output_layer.bias <- output.bias")
+
+    missing_before, unexpected_before = new_model.load_state_dict(new_sd, strict=False)
+
+    print("Legacy tag weight remap applied:")
+    for line in applied:
+        print("  ", line)
+    if missing_before:
+        print("Remaining missing keys:", missing_before)
+    if unexpected_before:
+        print("Unexpected keys (ignored):", unexpected_before)
+
+    return new_model

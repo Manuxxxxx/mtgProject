@@ -13,7 +13,7 @@ from torch.amp import autocast, GradScaler
 from transformers import get_linear_schedule_with_warmup
 from torch.nn import functional as F
 
-from src.models.tag_model import build_tag_model
+from src.models.tag_model import build_tag_model, load_legacy_tag_weights
 from src.models.bert_model import build_bert_model
 from src.models.synergy_model import (
     build_synergy_model,
@@ -859,7 +859,7 @@ def train_multitask_model(
     synergy_model = build_synergy_model(
         embedding_dim=synergy_model_input_dim,
         arch_name=config["synergy_arch"],
-        tag_projector_dim=config["tag_projector_output_dim"],
+        tag_projector_dim=config.get("tag_projector_output_dim", None),
         hidden_tag_dim=config.get("tag_hidden_dims")[-1],
     ).to(device)
 
@@ -1232,8 +1232,17 @@ def run_training_multitask(config):
         config.get("tag_checkpoint_multi", None)
         and config["tag_checkpoint_multi"] != ""
     ):
-        tag_model.load_state_dict(torch.load(config["tag_checkpoint_multi"]))
-        print(f"Loaded tag model checkpoint: {config['tag_checkpoint_multi']}")
+        try:
+            tag_model.load_state_dict(torch.load(config["tag_checkpoint_multi"]))
+            print(f"Loaded tag model checkpoint: {config['tag_checkpoint_multi']}")
+        except RuntimeError as e:
+            print(f"Error loading tag model checkpoint: {e}")
+            
+            print("Trying to load old format checkpoint by adjusting the state dict...")
+            tag_model = load_legacy_tag_weights(
+                tag_model, config["tag_checkpoint_multi"], device
+            )
+            
 
     train_multitask_model(
         config=config,
