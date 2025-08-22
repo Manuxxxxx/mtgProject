@@ -6,31 +6,31 @@
 
         "use_scheduler": false,
 
-        "start_epoch": 0,
-        "run_name_previous": null,
+        "start_epoch": 26,
+        "run_name_previous": "two_phase_joint__tag_hidden__detach_20250821_114407",
 
-        "bert_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_014802/bert_tag_only_epoch_4.pt",
-        "tag_checkpoint_tag": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_014802/tag_tag_only_model_epoch_4.pt",
+        "bert_checkpoint_tag": null,
+        "tag_checkpoint_tag": null,
 
-        "bert_checkpoint_multi": null,
-        "tag_checkpoint_multi": null,
+        "bert_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_114407/bert_tag_only_epoch_26.pt",
+        "tag_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_114407/tag_tag_only_model_epoch_26.pt",
         "synergy_checkpoint": null,
         "tag_projector_checkpoint": null,
 
         "freeze_bert_epochs_tag": 0,
         "freeze_bert_layers_tag": 0,
-        "freeze_bert_epochs_multi": 20,
-        "freeze_bert_layers_multi": 6,
+        "freeze_bert_epochs_multi": 10,
+        "freeze_bert_layers_multi": 4,
 
-        "epochs_multi": 30,
-        "epochs_tag": 30,
+        "epochs_multi": 40,
+        "epochs_tag": 0,
 
         "batch_size": 5,
-        "batch_size_tag": 10,
-        "accumulation_steps": 1,
+        "batch_size_tag": 5,
+        "accumulation_steps": 10,
         "use_empty_cache": false,
-        "eval_every": 3,
-        "save_every": 2,
+        "eval_every": 4,
+        "save_every": 4,
 
         "bert_model_name": "distilbert-base-uncased",
         "bert_learning_rate_multi": 1e-5,
@@ -78,6 +78,7 @@
         "focal_gamma": 3.0,
         "focal_alpha_from_pos_weight": false,
         "tag_use_sigmoid_output": false,
+        "tag_arch": "simple",
 
         "use_multitask_projector": false,
 
