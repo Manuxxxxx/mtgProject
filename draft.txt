@@ -1,0 +1,178 @@
+## Introduction & Objectives
+
+The project aims to build a recommender system that suggests cards to add to a partially completed Commander deck in Magic: The Gathering (MTG). Commander decks require exactly 100 singleton cards (no duplicates, excluding basic lands and specific cases), and synergy is highly contextual.
+
+The system’s primary focus is **synergy prediction** (how two cards work well together, improving each other) and **functional tag prediction** (categorizing cards into roles and mechanics). An additional tool was built to suggest the most synergistic cards for a given partial deck and commander, using weighted averages of synergy scores.
+
+Objectives:
+
+* Predict functional tags for cards.
+* Predict synergies between card pairs.
+* Combine these to support deck-building recommendations.
+* Explore modular architectures with toggles for experimentation (detach, symmetry, hidden-layer vs projector, multitask projector).
+* Investigate penalty terms for tag hierarchies (child vs parent consistency).
+
+## Data Sources
+
+**Functional Tags:**
+
+* Scraped from ScryfallTagger (community project assigning labels such as “activated ability,” “animate artifact”).
+* Tags represent roles and mechanics of cards.
+* Cards typically have 3–4 tags each.
+* Tag vocabulary evolves over time (tag count growing). Goal is to capture finer functionality without excessive complexity.
+
+**Synergy Data:**
+
+* Scraped from EDHREC, which recommends cards using a proprietary synergy formula.
+* Converted into binary synergy labels (1 = synergistic, 0 = not synergistic).
+* Negative examples were generated via random card pair sampling to prevent trivial all-positive predictions (acknowledged as weak negatives).
+* Built a GUI tool for manual synergy labeling with finer granularity.
+
+**Dataset Setup:**
+
+* Full set of MTG cards included.
+* Data split into training/validation/test sets.
+* Tag count thresholds applied (e.g., min count = 50 for inclusion, e.g. most present 130 tags or 199 tags in different experiments).
+
+## Models & Architectures
+
+### BERT/DistilBERT
+
+* Embedding dimension fixed at 384 (hardware constrained by GTX 970, 4GB VRAM).
+* Both BERT-base and DistilBERT tested.
+
+### Tag Model
+
+* Input: card embeddings from BERT.
+* Output: multi-label functional tag prediction.
+* Loss: Binary Cross-Entropy (BCE) or Focal Loss with class balancing.
+* Architecture (variants tested):
+
+  * Input: bert\_emb\_dim or multihead\_projector\_tag\_dim.
+  * Hidden layers: \[512 → 256 → output (tag count)] OR \[512 → 512 → output].
+* Penalty: hierarchy-based (child vs parent tag penalties, applied with loss weights).
+* Note: varying weights did not significantly change results (plateau effect, possibly due to tag dependencies).
+* Attempted attention block variant instead of MLP, but after 40+ epochs no meaningful difference observed.
+
+### Tag Projector (Optional)
+
+* Projects predicted tag probabilities (multi-hot vectors) into dense embeddings for synergy model.
+* Experimental design; unclear whether projection improves over direct binary tags.
+
+### Tag Hidden Layer Integration
+
+* Alternative: use hidden-layer activations from the tag model as input to the synergy model.
+* Richer continuous features possible.
+* Mutually exclusive with Tag Projector.
+* Detach option available to block gradient flow back into the Tag Model.
+
+### Synergy Model
+
+* Inputs: BERT embeddings, tag projections OR hidden-layer embeddings, element-wise interactions (concat, product, abs-diff).
+* Output: binary synergy prediction.
+* Loss: cross-entropy.
+* Architectures:
+
+  * Symmetrical version (order-invariant) → avoids dependence on card order.
+  * Non-symmetrical version (order-sensitive) → also implemented for flexibility.
+* Experimented with symmetrical reimplementation (no major differences observed).
+
+### MultiTask Projector (Optional)
+
+* Splits BERT embeddings into two specialized heads:
+
+  * Tag head (fed to Tag Model).
+  * Synergy head (fed to Synergy Model).
+* Implemented as two-head MLP or linear layers.
+* Rationale: avoid forcing one shared embedding to serve both tasks.
+* Promising but costly (slower convergence, discarded in some runs).
+
+## Training Setup & Hyperparameters
+
+* Multiple learning rates:
+
+  * Lower LR for pretrained BERT.
+  * Higher LR for custom heads (tag and synergy).
+  * Optional LR for tag\_projector and multihead\_projector.
+* Loss scaling: tag loss (Focal Loss) much smaller in scale than synergy loss → required custom LossScaler to balance joint training.
+* Training phases:
+
+  * First train Tag Model standalone.
+  * Then joint training with Synergy Model (detach toggle critical for isolating gradients).
+* Epoch dynamics: validation/test performance never decreased (no overfitting observed yet; suggests more training possible).
+* Hardware limits: batch size \~5, gradient accumulation needed. One epoch \~30+ min for Tag Model.
+* Each run controlled by JSON configs specifying all hyperparameters.
+
+## Experiments & Results
+
+### Tag Model
+
+* Early experiments:
+
+  * Trained on 130 most frequent tags (no hierarchy/penalty).
+  * Later on 199 tags with hierarchy + penalty.
+  * Similar progression; larger tag set slower to converge.
+* Performance:
+
+  * Accuracy and F1 decent, but worsened as tag count increased (due to rare/complex tags, harder options, small embedding size).
+* Observed reasons for poor performance with more tags:
+
+  * Rare tags hard to learn.
+  * Simply more output classes → harder problem.
+  * BERT embeddings may be too small to represent complex scenarios.
+
+### Synergy Model
+
+* Performance: decent F1, but dataset insufficient.
+* Overfitting observed on legendary creatures synergies (due to EDHREC bias toward commander-good card pairs).
+* Model categorized cards reasonably (found common features like keywords), but not necessarily true synergies (e.g., predicting “haste” + “flying” as synergy).
+* Symmetry fix did not change results substantially.
+* Main limitations: dataset size and weak negatives.
+
+### Joint Training
+
+* Without balancing: synergy loss dominated, hurting tag model.
+* With LossScaler: both models trained jointly without loss imbalance.
+* Detach critical: prevented synergy gradients from overwriting tag model learning.
+* MultiHead projector: promising for training both models from scratch but slower convergence, high compute cost.
+* Tag Projector: minimal effect on synergy results, problems persisted.
+
+## Limitations & Challenges
+
+* Strong hardware limits (GTX 970, 4GB VRAM, small batch sizes, gradient accumulation).
+* Random negative synergy samples bias model.
+* Tag projector effects unclear.
+* Difficult to determine superiority between hidden-layer embeddings vs projected tags.
+* Expanded tag count complicates training (dimensionality, instability).
+* Rare tags and increased options degrade performance.
+
+## Current Goals
+
+* Compare hidden-layer embeddings vs projected tags for synergy signals.
+* Measure detaching effects on joint training.
+* Evaluate importance of order-invariance.
+* Test specialized embeddings via MultiTaskProjector.
+* Expand tag vocabulary while controlling complexity (hierarchy, grouping, frequency cutoff).
+* Collect larger synergy dataset with GUI, replace random negatives.
+
+## Future Work
+
+* Collect more labeled synergy data (GUI + community input).
+* Explore efficient architectures (dual encoders, contrastive, graph-based).
+* Test full MultiTaskProjector runs.
+* Try schedulers, warmup, larger models (if hardware permits).
+* Improve negative sampling.
+* Explore tag compression (hierarchical grouping, autoencoder, frequency cutoffs).
+
+## Notes & Action Items
+
+* Enforce exclusivity of TagProjector vs hidden-layer embeddings.
+* Implement Detach and Symmetry toggles in configs.
+* Precompute/cache tag embeddings for efficiency.
+* Design experiments to compare:
+
+  * Hidden-layer vs projected tag embeddings.
+  * Detach vs joint gradient flow.
+  * Symmetry vs order-sensitive.
+  * MultiTaskProjector vs shared embeddings.
+* Replace random negatives gradually with labeled ones.
