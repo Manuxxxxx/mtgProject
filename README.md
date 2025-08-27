@@ -8,22 +8,22 @@ This repository contains scripts and tools for calculating, analyzing, and visua
 
 1. Clone the repository:
 
-\`\`\`bash
+```bash
 git clone <your-repo-url>
 cd mtgProject
-\`\`\`
+```
 
 2. Install dependencies:
 
-\`\`\`bash
+```bash
 pip install -r requirements.txt
-\`\`\`
+```
 
 3. Set your Python path:
 
-\`\`\`bash
+```bash
 export PYTHONPATH="/home/emanuele/Documenti/Università/ANLP/mtgProject/"
-\`\`\`
+```
 
 > **Note:** Adjust the path according to the location of your project folder.
 
@@ -36,15 +36,15 @@ export PYTHONPATH="/home/emanuele/Documenti/Università/ANLP/mtgProject/"
 **Purpose:** Train models jointly using configuration files.  
 **Usage:**
 
-\`\`\`bash
+```bash
 python src/joint_train.py <config_file>
-\`\`\`
+```
 
 **Example:**
 
-\`\`\`bash
+```bash
 python src/joint_train.py src/config_runs/runs_configs_joint.json
-\`\`\`
+```
 
 > You can configure the JSON file or use pre-made ones.
 
@@ -55,9 +55,9 @@ python src/joint_train.py src/config_runs/runs_configs_joint.json
 **Purpose:** Calculate synergies between cards using models and BERT embeddings.  
 **Usage:**
 
-\`\`\`bash
+```bash
 python src/synergy_navigation/calculate_all_synergy.py
-\`\`\`
+```
 
 > Important: Set the correct checkpoints, model settings, and store files. Can calculate synergies for all cards or a subset. Results are stored in a SQLite database.
 
@@ -68,9 +68,9 @@ python src/synergy_navigation/calculate_all_synergy.py
 **Purpose:** Calculate BERT outputs for cards and add them to the bulk file.  
 **Usage:**
 
-\`\`\`bash
+```bash
 python src/synergy_navigation/embeddings_calculator.py
-\`\`\`
+```
 
 > Important: Set the correct model checkpoints and store files. Outputs are saved back into the bulk file.
 
@@ -81,9 +81,9 @@ python src/synergy_navigation/embeddings_calculator.py
 **Purpose:** Launch a web interface to navigate card synergies.  
 **Usage:**
 
-\`\`\`bash
+```bash
 python src/synergy_navigation/synergy_graph_visualizer.py
-\`\`\`
+```
 
 > Requires the SQLite database of calculated synergies.
 
@@ -94,9 +94,9 @@ python src/synergy_navigation/synergy_graph_visualizer.py
 **Purpose:** Recommend the best cards for a partial deck based on average synergy.  
 **Usage:**
 
-\`\`\`bash
+```bash
 python src/utils/cards_advisor.py
-\`\`\`
+```
 
 > Optionally specify a commander to refine recommendations. Useful for quick testing.
 
