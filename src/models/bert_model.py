@@ -137,14 +137,52 @@ class BertEmbedRegressor(nn.Module):
     def num_encoder_layers(self):
         return len(self._get_transformer_layers())
 
-    def freeze_all(self):
+    def freeze_all(self, include_head: bool = True):
+        """Freeze all transformer params and (optionally) head layers."""
         for param in self.bert.parameters():
             param.requires_grad = False
+        if include_head:
+            for p in self.layer_norm.parameters():
+                p.requires_grad = False
+            for p in self.linear.parameters():
+                p.requires_grad = False
 
-    def unfreeze_all(self):
-        for param in self.bert.parameters():
-            param.requires_grad = True
+    def unfreeze_all(self, include_head: bool = True, unfreeze_embeddings: bool = True):
+        """Unfreeze every parameter (optionally also embeddings + head).
+        DistilBERT note: embeddings stay frozen if you previously called
+        freeze_encoder_layers (it always freezes embeddings). Set unfreeze_embeddings=True
+        to ensure they are re-enabled.
+        """
+        if unfreeze_embeddings:
+            emb = getattr(self.bert, 'embeddings', None)
+            if emb is not None:
+                for p in emb.parameters():
+                    p.requires_grad = True
+        # Unfreeze encoder/transformer blocks
+        for p in self.bert.parameters():
+            p.requires_grad = True
+        if include_head:
+            for p in self.layer_norm.parameters():
+                p.requires_grad = True
+            for p in self.linear.parameters():
+                p.requires_grad = True
 
+    def print_trainable_summary(self, max_lines: int = 40):
+        """Utility to debug which params remain frozen (helps for DistilBERT).
+        Prints first max_lines parameter status and a final tally.
+        """
+        trainable = 0
+        frozen = 0
+        lines = 0
+        for name, p in self.named_parameters():
+            if p.requires_grad:
+                trainable += p.numel()
+            else:
+                frozen += p.numel()
+            if lines < max_lines:
+                print(f"[{'T' if p.requires_grad else 'F'}] {name} {tuple(p.shape)}")
+                lines += 1
+        print(f"Trainable params: {trainable:,} | Frozen params: {frozen:,}")
 
 def build_bert_model(model_name, embedding_dim):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

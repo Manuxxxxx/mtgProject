@@ -15,7 +15,7 @@ from src.models.multitask_projector_model import build_multitask_projector_model
 BERT_MODEL_NAME = "distilbert-base-uncased"
 EMBEDDING_DIM = 384
 MAX_LEN = 256
-BERT_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/bert_multi_model_epoch_44.pth"
+BERT_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250825_233524/bert_multi_model_epoch_16.pth"
 
 # Tag model config (defaults; can be overridden via function args)
 TAG_HIDDEN_DIMS = [512, 512]
@@ -23,7 +23,7 @@ TAG_OUTPUT_DIM = 174
 TAG_DROPOUT = 0.3
 TAG_USE_SIGMOID_OUTPUT = True  # At inference you might want probabilities
 TAG_ARCH = "simple"
-TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/tag_multi_model_epoch_44.pth"
+TAG_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250825_233524/tag_multi_model_epoch_16.pth"
 
 # Projector defaults (optional)
 TAG_PROJECTOR_CHECKPOINT_FILE = None  # e.g. "checkpoints/.../tag_projector_model_epoch_XX.pth"

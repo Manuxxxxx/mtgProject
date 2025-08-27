@@ -15,14 +15,14 @@ from src.synergy_navigation.embeddings_calculator import safe_load_tag_model  # 
 EMBEDDING_DIM = 384
 # Synergy model selection: use hidden tag state OR projector output
 USE_TAG_PROJECTOR = False  # If True use projector vectors, else use tag model hidden states
-SYNERGY_ARCH = "modelComplexTagHidden"  # Must match representation type (modelComplex / modelComplexSymmetrical for projector, *TagHidden* for hidden)
+SYNERGY_ARCH = "modelComplexTagHiddenSymmetrical"  # Must match representation type (modelComplex / modelComplexSymmetrical for projector, *TagHidden* for hidden)
 MIXED_PRECISION = True
 
 # Synergy checkpoint
-SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/synergy_model_epoch_44.pth"
+SYNERGY_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250825_233524/synergy_model_epoch_16.pth"
 
 # Input cards file (only embeddings + metadata needed; tags inside file will be ignored)
-BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_174_20250822234013.json"
+BULK_EMBEDDING_FILE = "datasets/processed/embedding_predicted/joint_tag/cards_with_tags_174_20250826183504.json"
 
 # Tag model (must align with training used for synergy model)
 TAG_MODEL_ARCH = "simple"
@@ -30,7 +30,7 @@ TAG_MODEL_HIDDEN_DIMS = [512, 512]
 TAG_MODEL_OUTPUT_DIM = 174  # number of tags (logits/probs output dim)
 TAG_MODEL_DROPOUT = 0.3
 TAG_MODEL_USE_SIGMOID_OUTPUT = True  # we want probabilities when projecting
-TAG_MODEL_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250822_150413/tag_multi_model_epoch_44.pth"
+TAG_MODEL_CHECKPOINT_FILE = "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250825_233524/tag_multi_model_epoch_16.pth"
 TAG_LAST_HIDDEN_DIM = TAG_MODEL_HIDDEN_DIMS[-1]  # hidden state size passed to synergy when not using projector
 
 # Optional Tag projector
@@ -39,22 +39,46 @@ TAG_PROJECTOR_OUTPUT_DIM = 64  # dimension of tag projector vectors if used
 TAG_PROJECTOR_HIDDEN_DIM = None  # if your projector has hidden layer; set if needed
 TAG_PROJECTOR_DROPOUT = 0.3
 
+# New options
+BIDIRECTIONAL_SYNERGY = False  # If True compute and store synergy(i,j) and synergy(j,i)
+# INCLUDE_SET_CODES = ["blb","DFT","dsk"]  # e.g. ["mom", "dmr"]; if non-empty only these sets are kept
+INCLUDE_SET_CODES = ["MBS","NPH","M12","ISD","CMD"]  # MBS, NPH, M12, ISD, CMD
+EXCLUDE_SET_CODES = []  # e.g. ["2x2", "mul"]; ignored if INCLUDE_SET_CODES non-empty
+
 # Performance
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-BATCH_SIZE_TAG_INFERENCE = 256
+BATCH_SIZE_TAG_INFERENCE = 2560
 
 # DB / batching
-DB_FILE = "synergy_cache_compressed_174_20250822234013.sqlite"
+DB_FILE = "synergy_cache_compressed_174_sym_small_highfn.sqlite"
 CHUNK_SIZE = 15000
 # ==============
 
 
 def filter_cards(all_cards):
+    # Updated: allow include/exclude sets
+    include = {s.lower() for s in INCLUDE_SET_CODES if s}
+    exclude = {s.lower() for s in EXCLUDE_SET_CODES if s}
     filtered = {}
+    kept_by_set = 0
+    skipped_land = 0
+    skipped_set = 0
     for name, card in all_cards.items():
         if "Land" in card.get("type_line", ""):
+            skipped_land += 1
             continue
+        set_code = card.get("set", "").lower()
+        if include:
+            if set_code not in include:
+                skipped_set += 1
+                continue
+        else:  # only apply exclude when include not specified
+            if set_code in exclude:
+                skipped_set += 1
+                continue
         filtered[name] = card
+        kept_by_set += 1
+    print(f"Set filtering -> kept: {kept_by_set}, skipped_land: {skipped_land}, skipped_set: {skipped_set}")
     return filtered
 
 
@@ -111,6 +135,7 @@ def batch_pairs(card_count, chunk_size, start_idx=0):
 
 
 def count_remaining_pairs(n, start_idx):
+    print(f"Counting remaining pairs from index {start_idx} out of {n} cards...")
     return comb(n - start_idx, 2)
 
 
@@ -275,12 +300,22 @@ def main():
             with autocast_ctx:
                 logits = synergy_model(emb_a_batch, emb_b_batch, tag_a_batch, tag_b_batch)
                 scores = torch.sigmoid(logits).squeeze().float().cpu().tolist()
+                if BIDIRECTIONAL_SYNERGY:
+                    logits_rev = synergy_model(emb_b_batch, emb_a_batch, tag_b_batch, tag_a_batch)
+                    scores_rev = torch.sigmoid(logits_rev).squeeze().float().cpu().tolist()
+                else:
+                    scores_rev = None
 
-        for (i, j), score in zip(batch, scores):
+        for idx, ((i, j), score) in enumerate(zip(batch, scores)):
             cur.execute(
                 "INSERT OR REPLACE INTO synergies (idx_a, idx_b, score) VALUES (?, ?, ?)",
                 (i, j, score),
             )
+            if BIDIRECTIONAL_SYNERGY and scores_rev is not None:
+                cur.execute(
+                    "INSERT OR REPLACE INTO synergies (idx_a, idx_b, score) VALUES (?, ?, ?)",
+                    (j, i, scores_rev[idx]),
+                )
         conn.commit()
 
         # Update progress based on first i in batch
