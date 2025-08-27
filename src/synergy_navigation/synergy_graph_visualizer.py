@@ -167,14 +167,29 @@ def create_app(load_now: bool = True):
         t = threading.Thread(target=background_load, daemon=True)
         t.start()
 
+    # NEW: helper to always return a valid (open) connection
+    def get_db():
+        conn = current_app.config.get("DB_CONN")
+        if conn is None:
+            conn = sqlite3.connect(DEFAULT_DB_FILE, check_same_thread=False)
+            current_app.config["DB_CONN"] = conn
+            return conn
+        # If connection was closed, a simple pragma will raise ProgrammingError
+        try:
+            conn.execute("SELECT 1")
+        except sqlite3.ProgrammingError:
+            conn = sqlite3.connect(DEFAULT_DB_FILE, check_same_thread=False)
+            current_app.config["DB_CONN"] = conn
+        return conn
+
     @lru_cache(maxsize=128)
     def query_synergies_cached(sets_key, min_score, max_score, scale):
-        # Access runtime resources from app config
+        # Access runtime resources from app config (re-fetch connection each call)
         all_cards = current_app.config["ALL_CARDS"]
         name_to_idx = current_app.config["NAME_TO_IDX"]
         card_names = current_app.config["CARD_NAMES"]
         umap_coords = current_app.config["UMAP_COORDS"]
-        conn = current_app.config["DB_CONN"]
+        conn = get_db()  # use resilient getter
         print(
             f"Querying synergies for sets: {sets_key}, score range: [{min_score}, {max_score}], scale: {scale}"
         )
@@ -283,12 +298,10 @@ def create_app(load_now: bool = True):
 
     @app.teardown_appcontext
     def close_connection(exc):
-        conn = current_app.config.get("DB_CONN")
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        # Intentionally DO NOT close the persistent connection here.
+        # Leaving it open avoids 'Cannot operate on a closed database.' when using cached calls.
+        # If needed, a graceful shutdown handler could close it explicitly.
+        pass
 
     return app
 

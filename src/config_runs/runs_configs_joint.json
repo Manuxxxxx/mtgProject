@@ -1,26 +1,26 @@
 [{
-        "run_name": "two_phase_joint__tag_hidden__detach",
+        "run_name": "two_phase_joint__tag_hidden__sym__detach",
 
         "train_tag_model": true,
         "detach_tag_synergy": true,
 
         "use_scheduler": false,
 
-        "start_epoch": 26,
-        "run_name_previous": "two_phase_joint__tag_hidden__detach_20250821_114407",
+        "start_epoch": 0,
+        "run_name_previous": null,
 
         "bert_checkpoint_tag": null,
         "tag_checkpoint_tag": null,
 
-        "bert_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_114407/bert_tag_only_epoch_26.pt",
-        "tag_checkpoint_multi": "checkpoints/two_phase_joint/two_phase_joint__tag_hidden__detach_20250821_114407/tag_tag_only_model_epoch_26.pt",
-        "synergy_checkpoint": null,
+        "bert_checkpoint_multi": "pesi leo/checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250823_023428/bert_multi_model_epoch_16.pth",
+        "tag_checkpoint_multi": "pesi leo/checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250823_023428/tag_multi_model_epoch_16.pth",
+        "synergy_checkpoint": "pesi leo/checkpoints/two_phase_joint/two_phase_joint__tag_hidden__sym__detach_20250823_023428/synergy_model_epoch_16.pth",
         "tag_projector_checkpoint": null,
 
         "freeze_bert_epochs_tag": 0,
         "freeze_bert_layers_tag": 0,
-        "freeze_bert_epochs_multi": 10,
-        "freeze_bert_layers_multi": 4,
+        "freeze_bert_epochs_multi": 30,
+        "freeze_bert_layers_multi": 3,
 
         "epochs_multi": 40,
         "epochs_tag": 0,
@@ -39,14 +39,14 @@
         "bert_embedding_dim": 384,
         "max_length_bert_tokenizer": 256,
 
-        "synergy_arch": "modelComplexTagHidden",
+        "synergy_arch": "modelComplexTagHiddenSymmetrical",
         "synergy_learning_rate": 1e-4,
 
         "optimizer": "Adam",
         "optimizer_config": {},
 
         "synergy_pos_weight": null,
-        "synergy_false_positive_penalty": 3.0,
+        "synergy_false_positive_penalty": 20.0,
 
         "weight_penalty_ancestors": 1,
         "tag_bulk_file": "datasets/scryfallTagger_data/store_scrapped_ancestors.json",
@@ -62,7 +62,7 @@
             "val": 0.1
         },
         "splits": {
-            "train": { "real": 0.5, "fake": 0.2 },
+            "train": { "real": 0.6, "fake": 0.9 },
             "val_real": { "real": 0.1, "fake": 0.0 },
             "val_real_fake": { "real": 0.1, "fake": 0.03 }
         },
